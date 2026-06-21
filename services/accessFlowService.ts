@@ -1,0 +1,480 @@
+import { createHmac, randomBytes } from "crypto";
+import { Prisma } from "@prisma/client";
+import { type Address, type Hash } from "viem";
+import { buildCircleSendRequirement } from "@/lib/circle";
+import { prisma } from "@/lib/prisma";
+import {
+  InputError,
+  normalizeAddress,
+  normalizeTxHash,
+  parsePositiveUsdcAmount,
+} from "@/lib/validation";
+import { verifySettlement } from "@/services/arcVerifier";
+import { LedgerStatus, logAccessDenied, logEvent } from "@/services/ledgerService";
+
+const INTENT_TTL_MS =
+  Number(process.env.ACCESS_INTENT_TTL_SECONDS ?? 600) * 1000;
+const TOKEN_TTL_SECONDS = Number(process.env.ACCESS_TOKEN_TTL_SECONDS ?? 3600);
+
+type AccessIntent = {
+  accessId: string;
+  resourceId: string;
+  payerWallet: Address;
+  amountUSDC: number;
+  recipientWallet: Address;
+  expiresAt: string;
+  createdAt: string;
+};
+
+type GlobalAccessState = {
+  accessMeshIntents?: Map<string, AccessIntent>;
+  accessMeshTokenSecret?: string;
+};
+
+const globalAccessState = globalThis as typeof globalThis & GlobalAccessState;
+const accessIntents =
+  globalAccessState.accessMeshIntents ?? new Map<string, AccessIntent>();
+
+if (!globalAccessState.accessMeshIntents) {
+  globalAccessState.accessMeshIntents = accessIntents;
+}
+
+export async function createAccessPaymentIntent(params: {
+  resourceId: string;
+  payerWallet: string;
+  fallbackRecipientWallet?: string | null;
+  fallbackAmountUSDC?: string | number | null;
+}) {
+  const payerWallet = normalizeAddress(params.payerWallet, "wallet");
+  const paymentFields = await resolvePaymentFields(params.resourceId, {
+    fallbackAmountUSDC: params.fallbackAmountUSDC,
+    fallbackRecipientWallet: params.fallbackRecipientWallet,
+  });
+  const createdAt = new Date();
+  const expiresAt = new Date(createdAt.getTime() + INTENT_TTL_MS);
+  const accessId = await createIntentAccessId({
+    resourceId: params.resourceId,
+    payerWallet,
+  });
+
+  const intent: AccessIntent = {
+    accessId,
+    resourceId: params.resourceId,
+    payerWallet,
+    amountUSDC: paymentFields.amountUSDC,
+    recipientWallet: paymentFields.recipientWallet,
+    createdAt: createdAt.toISOString(),
+    expiresAt: expiresAt.toISOString(),
+  };
+
+  accessIntents.set(accessId, intent);
+
+  await logEvent({
+    resourceId: params.resourceId,
+    payerWallet,
+    status: LedgerStatus.PaymentInitiated,
+  });
+
+  return {
+    accessId,
+    amountUSDC: paymentFields.amountUSDC,
+    recipientWallet: paymentFields.recipientWallet,
+    expiresAt: intent.expiresAt,
+    payerWallet,
+    resource: {
+      id: paymentFields.resource.id,
+      name: paymentFields.resource.name,
+      type: paymentFields.resource.type,
+      description: paymentFields.resource.description,
+    },
+    payment: buildCircleSendRequirement({
+      amountUSDC: paymentFields.amountUSDC,
+      providerWallet: paymentFields.recipientWallet,
+    }),
+  };
+}
+
+export async function unlockAccess(params: {
+  accessId: string;
+  txHash: string;
+}) {
+  const accessId = requireString(params.accessId, "accessId");
+  const txHash = normalizeTxHash(params.txHash);
+  const intent = await resolveAccessIntent(accessId);
+
+  assertIntentActive(intent);
+
+  const payment = await reservePayment({
+    txHash,
+    resourceId: intent.resourceId,
+    payerWallet: intent.payerWallet,
+    providerWallet: intent.recipientWallet,
+    amountUSDC: intent.amountUSDC,
+  });
+
+  await logEvent({
+    resourceId: intent.resourceId,
+    payerWallet: intent.payerWallet,
+    txHash,
+    status: LedgerStatus.PaymentSubmitted,
+  });
+
+  const verification = await verifySettlement({
+    txHash,
+    payerWallet: intent.payerWallet,
+    providerWallet: intent.recipientWallet,
+    amountUSDC: intent.amountUSDC,
+  }).catch(async (error: unknown) => {
+    await prisma.payment.update({
+      where: { txHash },
+      data: { status: "CONFIRMING" },
+    });
+    await logEvent({
+      resourceId: intent.resourceId,
+      payerWallet: intent.payerWallet,
+      txHash,
+      status: LedgerStatus.PaymentVerificationUnavailable,
+    });
+
+    return {
+      status: "CONFIRMING" as const,
+      settled: false,
+      reason: `Arc verification unavailable: ${getErrorMessage(error)}`,
+      txHash,
+    };
+  });
+
+  if (verification.status !== "SETTLED") {
+    const status = verification.status === "FAILED" ? "FAILED" : "CONFIRMING";
+    await prisma.payment.update({
+      where: { txHash },
+      data: { status },
+    });
+
+    if (status === "FAILED") {
+      await logEvent({
+        resourceId: intent.resourceId,
+        payerWallet: intent.payerWallet,
+        txHash,
+        status: LedgerStatus.PaymentFailed,
+      });
+      await logAccessDenied({
+        resourceId: intent.resourceId,
+        payerWallet: intent.payerWallet,
+        txHash,
+      });
+    }
+
+    return {
+      ok: false,
+      access: "LOCKED",
+      payment: {
+        id: payment.id,
+        status,
+        txHash,
+      },
+      verification,
+    };
+  }
+
+  await settlePayment({
+    txHash,
+    resourceId: intent.resourceId,
+    payerWallet: intent.payerWallet,
+  });
+
+  const token = signAccessToken({
+    accessId,
+    resourceId: intent.resourceId,
+    payerWallet: intent.payerWallet,
+    txHash,
+  });
+
+  return {
+    ok: true,
+    access: "UNLOCKED",
+    accessToken: token.value,
+    tokenType: "Bearer",
+    expiresAt: token.expiresAt,
+    resourceId: intent.resourceId,
+    txHash,
+    verification,
+  };
+}
+
+async function createIntentAccessId(params: {
+  resourceId: string;
+  payerWallet: Address;
+}) {
+  try {
+    const log = await prisma.accessLog.create({
+      data: {
+        resourceId: params.resourceId,
+        payerWallet: params.payerWallet,
+        status: "PAYMENT_INTENT",
+      },
+    });
+
+    return log.id;
+  } catch {
+    return `mem_${randomBytes(16).toString("hex")}`;
+  }
+}
+
+async function resolveAccessIntent(accessId: string): Promise<AccessIntent> {
+  const fallback = accessIntents.get(accessId);
+
+  const accessLog = await prisma.accessLog
+    .findUnique({ where: { id: accessId } })
+    .catch(() => null);
+
+  if (!accessLog) {
+    if (fallback) {
+      return fallback;
+    }
+
+    throw new InputError("accessId was not found");
+  }
+
+  const paymentFields = await resolvePaymentFields(accessLog.resourceId, {
+    fallbackAmountUSDC: fallback?.amountUSDC,
+    fallbackRecipientWallet: fallback?.recipientWallet,
+  });
+  const createdAt = accessLog.createdAt;
+
+  return {
+    accessId,
+    resourceId: accessLog.resourceId,
+    payerWallet: normalizeAddress(
+      accessLog.payerWallet || fallback?.payerWallet,
+      "payerWallet",
+    ),
+    amountUSDC: paymentFields.amountUSDC,
+    recipientWallet: paymentFields.recipientWallet,
+    createdAt: createdAt.toISOString(),
+    expiresAt: new Date(createdAt.getTime() + INTENT_TTL_MS).toISOString(),
+  };
+}
+
+async function resolvePaymentFields(
+  resourceId: string,
+  fallback?: {
+    fallbackRecipientWallet?: string | Address | null;
+    fallbackAmountUSDC?: string | number | null;
+  },
+) {
+  const resource = await prisma.resource.findUnique({
+    where: { id: resourceId },
+  });
+
+  if (!resource || !resource.isActive) {
+    throw new InputError("resource not found or inactive");
+  }
+
+  const amountUSDC =
+    Number.isFinite(resource.priceUSDC) && resource.priceUSDC > 0
+      ? resource.priceUSDC
+      : parseFallbackAmount(fallback?.fallbackAmountUSDC);
+
+  const owner = await prisma.user
+    .findUnique({ where: { id: resource.ownerId } })
+    .catch(() => null);
+
+  const recipientWallet =
+    owner?.walletAddress && owner.walletAddress.length > 0
+      ? normalizeAddress(owner.walletAddress, "recipientWallet")
+      : parseFallbackRecipient(fallback?.fallbackRecipientWallet);
+
+  return {
+    resource,
+    amountUSDC,
+    recipientWallet,
+  };
+}
+
+function parseFallbackAmount(value: string | number | null | undefined) {
+  if (value === undefined || value === null || value === "") {
+    throw new InputError("resource priceUSDC is missing");
+  }
+
+  return parsePositiveUsdcAmount(value);
+}
+
+function parseFallbackRecipient(value: string | Address | null | undefined) {
+  if (!value) {
+    throw new InputError("resource recipient wallet is missing");
+  }
+
+  return normalizeAddress(value, "recipientWallet");
+}
+
+async function reservePayment(params: {
+  txHash: Hash;
+  resourceId: string;
+  payerWallet: Address;
+  providerWallet: Address;
+  amountUSDC: number;
+}) {
+  const existingByHash = await prisma.payment.findUnique({
+    where: { txHash: params.txHash },
+  });
+
+  if (existingByHash) {
+    if (
+      existingByHash.resourceId !== params.resourceId ||
+      existingByHash.payerWallet !== params.payerWallet ||
+      existingByHash.providerWallet !== params.providerWallet
+    ) {
+      throw new InputError("txHash is already tied to another access request");
+    }
+
+    return existingByHash;
+  }
+
+  const existingSettlement = await prisma.payment.findFirst({
+    where: {
+      resourceId: params.resourceId,
+      payerWallet: params.payerWallet,
+      status: "SETTLED",
+    },
+  });
+
+  if (existingSettlement) {
+    throw new InputError("access is already settled for this wallet/resource");
+  }
+
+  try {
+    return await prisma.payment.create({
+      data: {
+        resourceId: params.resourceId,
+        payerWallet: params.payerWallet,
+        providerWallet: params.providerWallet,
+        amountUSDC: params.amountUSDC,
+        txHash: params.txHash,
+        status: "PENDING",
+      },
+    });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      throw new InputError("txHash has already been submitted");
+    }
+
+    throw error;
+  }
+}
+
+async function settlePayment(params: {
+  txHash: Hash;
+  resourceId: string;
+  payerWallet: Address;
+}) {
+  await prisma.$transaction(async (tx) => {
+    const duplicateSettlement = await tx.payment.findFirst({
+      where: {
+        resourceId: params.resourceId,
+        payerWallet: params.payerWallet,
+        status: "SETTLED",
+        NOT: { txHash: params.txHash },
+      },
+    });
+
+    if (duplicateSettlement) {
+      throw new InputError("access is already settled with another txHash");
+    }
+
+    await tx.payment.update({
+      where: { txHash: params.txHash },
+      data: { status: "SETTLED" },
+    });
+
+    await tx.accessLog.create({
+      data: {
+        resourceId: params.resourceId,
+        payerWallet: params.payerWallet,
+        txHash: params.txHash,
+        status: LedgerStatus.Unlocked,
+      },
+    });
+  });
+
+  await logEvent({
+    resourceId: params.resourceId,
+    payerWallet: params.payerWallet,
+    txHash: params.txHash,
+    status: LedgerStatus.PaymentConfirmed,
+  });
+}
+
+function assertIntentActive(intent: AccessIntent) {
+  if (Date.now() > new Date(intent.expiresAt).getTime()) {
+    throw new InputError("accessId has expired");
+  }
+}
+
+function signAccessToken(params: {
+  accessId: string;
+  resourceId: string;
+  payerWallet: Address;
+  txHash: Hash;
+}) {
+  const now = Math.floor(Date.now() / 1000);
+  const exp = now + TOKEN_TTL_SECONDS;
+  const header = { alg: "HS256", typ: "JWT" };
+  const payload = {
+    iss: "accessmesh",
+    aud: "accessmesh-resource",
+    sub: params.payerWallet,
+    accessId: params.accessId,
+    resourceId: params.resourceId,
+    txHash: params.txHash,
+    iat: now,
+    exp,
+  };
+  const unsigned = `${base64Url(JSON.stringify(header))}.${base64Url(
+    JSON.stringify(payload),
+  )}`;
+  const signature = createHmac("sha256", getAccessTokenSecret())
+    .update(unsigned)
+    .digest("base64url");
+
+  return {
+    value: `${unsigned}.${signature}`,
+    expiresAt: new Date(exp * 1000).toISOString(),
+  };
+}
+
+function getAccessTokenSecret() {
+  if (process.env.ACCESS_TOKEN_SECRET) {
+    return process.env.ACCESS_TOKEN_SECRET;
+  }
+
+  if (process.env.CIRCLE_APP_KEY) {
+    return process.env.CIRCLE_APP_KEY;
+  }
+
+  globalAccessState.accessMeshTokenSecret ??= randomBytes(32).toString("hex");
+  return globalAccessState.accessMeshTokenSecret;
+}
+
+function base64Url(value: string) {
+  return Buffer.from(value).toString("base64url");
+}
+
+function requireString(value: unknown, field: string) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new InputError(`${field} is required`);
+  }
+
+  return value.trim();
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "unknown verification error";
+}

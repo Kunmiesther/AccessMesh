@@ -1,0 +1,47 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  walletAddress String   @unique
+  role          String   // CONSUMER | PROVIDER
+  createdAt     DateTime @default(now())
+}
+
+model Resource {
+  id            String   @id @default(cuid())
+  ownerId       String
+  name          String
+  type          String   // API | CONTENT | TOOL | DATASET
+  endpoint      String
+  description   String
+  priceUSDC     Float
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+}
+
+model Payment {
+  id              String   @id @default(cuid())
+  resourceId      String
+  payerWallet     String
+  providerWallet  String
+  amountUSDC      Float
+  txHash          String   @unique
+  status          String   // PENDING | CONFIRMING | SETTLED | FAILED
+  createdAt       DateTime @default(now())
+}
+
+model AccessLog {
+  id          String   @id @default(cuid())
+  resourceId  String
+  payerWallet String
+  status      String   // BLOCKED | UNLOCKED
+  txHash      String?
+  createdAt   DateTime @default(now())
+}
