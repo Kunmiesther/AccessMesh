@@ -1,8 +1,163 @@
-export default function Home() {
+"use client";
+
+import { FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useWallet } from "@/hooks/useWallet";
+
+export default function HomePage() {
+  const router = useRouter();
+  const { connectWallet, loading, error } = useWallet();
+  const [username, setUsername] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const trimmedUsername = username.trim();
+    if (!trimmedUsername) {
+      setFormError("Enter a username to continue.");
+      return;
+    }
+
+    setFormError(null);
+    await connectWallet(trimmedUsername);
+    router.push("/dashboard");
+  }
+
+  const visibleError = formError ?? error;
+
   return (
-    <main>
-      <h1>AccessMesh</h1>
-      <p>Arc Testnet USDC payment-gated API access.</p>
+    <main
+      style={{
+        minHeight: "100vh",
+        background: "var(--bg)",
+        color: "var(--text-primary)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <section
+        style={{
+          width: "100%",
+          maxWidth: 420,
+        }}
+      >
+        <div style={{ marginBottom: 28 }}>
+          <p
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              color: "var(--accent)",
+              textTransform: "uppercase",
+              letterSpacing: "0.1em",
+              marginBottom: 12,
+            }}
+          >
+            Modular Wallet
+          </p>
+          <h1
+            style={{
+              fontSize: 34,
+              fontWeight: 600,
+              lineHeight: 1.15,
+              marginBottom: 12,
+            }}
+          >
+            AccessMesh
+          </h1>
+          <p
+            style={{
+              fontSize: 14,
+              color: "var(--text-secondary)",
+              lineHeight: 1.7,
+            }}
+          >
+            Secure access for USDC-gated resources. Continue with a passkey to
+            create or unlock your smart account identity.
+          </p>
+        </div>
+
+        <form
+          onSubmit={handleSubmit}
+          style={{
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            padding: 20,
+          }}
+        >
+          <label
+            htmlFor="username"
+            style={{
+              display: "block",
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              color: "var(--text-muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              marginBottom: 10,
+            }}
+          >
+            Username
+          </label>
+          <input
+            id="username"
+            type="text"
+            autoComplete="username webauthn"
+            value={username}
+            disabled={loading}
+            onChange={(event) => {
+              setUsername(event.target.value);
+              setFormError(null);
+            }}
+            placeholder="name@example.com"
+            style={{
+              width: "100%",
+              fontSize: 14,
+              background: "#0a0a0a",
+              border: `1px solid ${visibleError ? "var(--error)" : "var(--border)"}`,
+              color: "var(--text-primary)",
+              borderRadius: 4,
+              padding: "11px 12px",
+              outline: "none",
+              marginBottom: 12,
+            }}
+          />
+
+          {visibleError && (
+            <p
+              style={{
+                color: "var(--error)",
+                fontSize: 12,
+                lineHeight: 1.5,
+                marginBottom: 12,
+              }}
+            >
+              {visibleError}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            style={{
+              width: "100%",
+              background: loading ? "var(--accent-dim)" : "var(--accent)",
+              color: loading ? "var(--text-secondary)" : "#000",
+              border: "none",
+              borderRadius: 4,
+              fontSize: 13,
+              fontWeight: 600,
+              padding: "11px 14px",
+              cursor: loading ? "wait" : "pointer",
+            }}
+          >
+            {loading ? "Initializing wallet..." : "Continue with Passkey"}
+          </button>
+        </form>
+      </section>
     </main>
   );
 }

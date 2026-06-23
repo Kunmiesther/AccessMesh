@@ -76,7 +76,7 @@ export async function verifySettlement(params: {
   }
 
   const latestBlock = await arcPublicClient.getBlockNumber();
-  const confirmations = latestBlock - receipt.blockNumber + 1n;
+  const confirmations = latestBlock - receipt.blockNumber + BigInt(1);
   if (confirmations < requiredConfirmations) {
     return {
       status: "CONFIRMING",
