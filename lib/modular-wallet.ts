@@ -54,12 +54,28 @@ async function createOrLoginCredential(username: string) {
     window.localStorage.setItem(storageKey, credential.id);
     return credential;
   } catch (error) {
+    if (!credentialId && isDuplicateUsernameError(error)) {
+      const credential = await toWebAuthnCredential({
+        transport,
+        username,
+        mode: WebAuthnMode.Login,
+      });
+
+      window.localStorage.setItem(storageKey, credential.id);
+      return credential;
+    }
+
     if (credentialId) {
       window.localStorage.removeItem(storageKey);
     }
 
     throw error;
   }
+}
+
+function isDuplicateUsernameError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /username.*duplicat|duplicat.*username/i.test(message);
 }
 
 export async function initWallet(username: string) {

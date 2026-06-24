@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import type { CSSProperties } from "react";
+import { WalletGateLink } from "@/components/WalletGateLink";
 import { useWallet } from "@/lib/ui/WalletContext";
 import { shortAddress } from "@/lib/ui";
 
@@ -43,28 +45,44 @@ export function Navbar() {
             display: "flex",
             alignItems: "center",
             gap: 8,
+            whiteSpace: "nowrap",
           }}
         >
-          <span style={{ color: "var(--accent)" }}>●</span>
-          AccessMesh
+          <span style={{ color: "var(--accent)" }}>AccessMesh</span>
         </Link>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 16,
+            marginLeft: "auto",
+          }}
+        >
+          <Link href="/explore" style={navLinkStyle}>
+            Explore
+          </Link>
+          <WalletGateLink href="/dashboard" style={navLinkStyle}>
+            Dashboard
+          </WalletGateLink>
+          <Link href="/wallet" style={navLinkStyle}>
+            Wallet
+          </Link>
+          <a
+            href="https://github.com"
+            target="_blank"
+            rel="noreferrer"
+            style={navLinkStyle}
+          >
+            GitHub
+          </a>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {connected && address ? (
             <>
               <Link
                 href="/dashboard"
-                style={{
-                  fontSize: 13,
-                  color: "var(--text-secondary)",
-                  textDecoration: "none",
-                  padding: "4px 10px",
-                  borderRadius: 4,
-                }}
-              >
-                Dashboard
-              </Link>
-              <div
                 style={{
                   fontFamily: "var(--font-mono)",
                   fontSize: 12,
@@ -76,6 +94,7 @@ export function Navbar() {
                   display: "flex",
                   alignItems: "center",
                   gap: 6,
+                  textDecoration: "none",
                 }}
               >
                 <span
@@ -89,7 +108,7 @@ export function Navbar() {
                   }}
                 />
                 {shortAddress(address)}
-              </div>
+              </Link>
               <button
                 type="button"
                 onClick={disconnect}
@@ -108,18 +127,20 @@ export function Navbar() {
             </>
           ) : (
             <Link
-              href="/"
+              href="/wallet"
               style={{
                 fontSize: 13,
-                background: "var(--surface)",
-                color: "var(--text-primary)",
-                border: "1px solid var(--border)",
+                background: "var(--accent)",
+                color: "#000",
+                border: "1px solid var(--accent)",
                 borderRadius: 4,
                 padding: "6px 14px",
                 textDecoration: "none",
+                fontWeight: 600,
+                whiteSpace: "nowrap",
               }}
             >
-              Connect wallet
+              Connect Wallet
             </Link>
           )}
         </div>
@@ -127,3 +148,11 @@ export function Navbar() {
     </nav>
   );
 }
+
+const navLinkStyle = {
+  fontSize: 13,
+  color: "var(--text-secondary)",
+  textDecoration: "none",
+  padding: "4px 0",
+  whiteSpace: "nowrap",
+} satisfies CSSProperties;

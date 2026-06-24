@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Navbar } from "@/components/Navbar";
 import { LedgerTable } from "@/components/LedgerTable";
+import { WalletCopyButton } from "@/components/WalletCopyButton";
 import { useWallet } from "@/lib/ui/WalletContext";
 import { formatDate, formatUSDC, shortAddress } from "@/lib/ui";
 import { getLedger, getResources } from "@/lib/api";
@@ -101,27 +102,37 @@ export default function DashboardPage() {
           {connected && address ? (
             <div
               style={{
-                display: "inline-flex",
+                display: "flex",
                 alignItems: "center",
                 gap: 8,
-                fontFamily: "var(--font-mono)",
-                fontSize: 12,
-                color: "var(--text-secondary)",
-                background: "var(--surface)",
-                border: "1px solid var(--border)",
-                borderRadius: 4,
-                padding: "7px 10px",
+                flexWrap: "wrap",
               }}
             >
-              <span
+              <div
                 style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: "50%",
-                  background: "var(--accent)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 12,
+                  color: "var(--text-secondary)",
+                  background: "var(--surface)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 4,
+                  padding: "7px 10px",
                 }}
-              />
-              Connected {shortAddress(address)}
+              >
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    background: "var(--accent)",
+                  }}
+                />
+                Connected {shortAddress(address)}
+              </div>
+              <WalletCopyButton address={address} />
             </div>
           ) : (
             <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
@@ -129,6 +140,23 @@ export default function DashboardPage() {
             </p>
           )}
         </header>
+
+        {connected && address && (
+          <nav
+            aria-label="Dashboard navigation"
+            style={{
+              display: "flex",
+              gap: 10,
+              flexWrap: "wrap",
+              marginBottom: 28,
+            }}
+          >
+            <DashboardNavLink href="/dashboard">Dashboard</DashboardNavLink>
+            <DashboardNavLink href="/explore">Explore Resources</DashboardNavLink>
+            <DashboardNavLink href="/resources/create">Create Resource</DashboardNavLink>
+            <DashboardNavLink href="/wallet">Wallet</DashboardNavLink>
+          </nav>
+        )}
 
         {!connected && (
           <EmptyPanel
@@ -212,6 +240,31 @@ export default function DashboardPage() {
         )}
       </main>
     </div>
+  );
+}
+
+function DashboardNavLink({
+  href,
+  children,
+}: {
+  href: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      style={{
+        fontSize: 12,
+        color: "var(--text-secondary)",
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: 4,
+        padding: "7px 10px",
+        textDecoration: "none",
+      }}
+    >
+      {children}
+    </Link>
   );
 }
 

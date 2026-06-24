@@ -69,6 +69,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
     try {
       const session = await initWallet(username);
+      await restoreWalletIdentity(session.address);
       setAddress(session.address);
       setSmartAccount(session.smartAccount);
       setBundlerClient(session.bundlerClient);
@@ -122,4 +123,16 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
 export function useWallet() {
   return useContext(WalletContext);
+}
+
+async function restoreWalletIdentity(wallet: string) {
+  const response = await fetch("/api/wallet/identity", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ wallet }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Wallet identity could not be restored.");
+  }
 }

@@ -107,6 +107,34 @@ export type ResourceListResponse = {
   resources: ResourceMeta[];
 };
 
+export type ProtocolStats = {
+  totalResources: number;
+  totalUnlocks: number;
+  totalUSDCVolume: number;
+  totalCreators: number;
+};
+
+export type ProtocolStatsResponse = {
+  ok: boolean;
+  stats: ProtocolStats;
+};
+
+export type RecentActivityEntry = {
+  id: string;
+  resourceId: string;
+  resourceName: string;
+  resourceType: ResourceType;
+  payerWallet: string;
+  status: string;
+  txHash: string | null;
+  createdAt: string;
+};
+
+export type RecentActivityResponse = {
+  ok: boolean;
+  activity: RecentActivityEntry[];
+};
+
 // Wallet state
 export type WalletState = {
   address: string | null;

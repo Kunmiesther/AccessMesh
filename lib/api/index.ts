@@ -4,6 +4,8 @@ import type {
   PaymentInitiateRequest,
   PaymentInitiateResponse,
   PaymentVerifyResponse,
+  ProtocolStatsResponse,
+  RecentActivityResponse,
   ResourceListResponse,
   UnlockRequest,
   UnlockResponse,
@@ -116,4 +118,16 @@ export async function getResources(opts: {
   if (opts.includeInactive) params.set("includeInactive", "true");
 
   return apiFetch<ResourceListResponse>(`/api/resource/create?${params}`);
+}
+
+export async function getFeaturedResources(): Promise<ResourceListResponse> {
+  return apiFetch<ResourceListResponse>("/api/resources/featured");
+}
+
+export async function getProtocolStats(): Promise<ProtocolStatsResponse> {
+  return apiFetch<ProtocolStatsResponse>("/api/protocol/stats");
+}
+
+export async function getRecentActivity(): Promise<RecentActivityResponse> {
+  return apiFetch<RecentActivityResponse>("/api/activity/recent");
 }

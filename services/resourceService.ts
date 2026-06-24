@@ -48,6 +48,7 @@ export async function getResource(id: string) {
 export async function listResources(params?: {
   ownerId?: string;
   includeInactive?: boolean;
+  limit?: number;
 }) {
   return prisma.resource.findMany({
     where: {
@@ -55,6 +56,7 @@ export async function listResources(params?: {
       ...(params?.includeInactive ? {} : { isActive: true }),
     },
     orderBy: { createdAt: "desc" },
+    ...(params?.limit ? { take: params.limit } : {}),
   });
 }
 
