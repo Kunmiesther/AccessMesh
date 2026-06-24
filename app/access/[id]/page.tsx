@@ -12,7 +12,8 @@ import type { PaymentIntent } from "@/types";
 
 type PageState =
   | { phase: "no-wallet" }
-  | { phase: "loading" }
+  | { phase: "idle" }
+  | { phase: "loading-intent" }
   | { phase: "ready"; intent: PaymentIntent }
   | { phase: "unlocked"; accessToken: string; resourceId: string; expiresAt?: string }
   | { phase: "error"; message: string };
@@ -28,20 +29,32 @@ export default function AccessPage() {
       return;
     }
 
-    setState({ phase: "loading" });
-
-    getAccessIntent(id, address)
-      .then((res) => {
-        if (res.ok) {
-          setState({ phase: "ready", intent: res.paymentIntent });
-        } else {
-          setState({ phase: "error", message: "Failed to load access intent." });
-        }
-      })
-      .catch((err: Error) => {
-        setState({ phase: "error", message: err.message });
-      });
+    setState({ phase: "idle" });
   }, [id, address, connected]);
+
+  async function handleUnlockClick() {
+    if (!address) {
+      setState({ phase: "no-wallet" });
+      return;
+    }
+
+    setState({ phase: "loading-intent" });
+
+    try {
+      const res = await getAccessIntent(id, address);
+      if (res.ok) {
+        setState({ phase: "ready", intent: res.paymentIntent });
+      } else {
+        setState({ phase: "error", message: "Failed to load access intent." });
+      }
+    } catch (err) {
+      setState({
+        phase: "error",
+        message:
+          err instanceof Error ? err.message : "Failed to load access intent.",
+      });
+    }
+  }
 
   function handleUnlocked(accessToken: string, resourceId: string, expiresAt?: string) {
     setState({ phase: "unlocked", accessToken, resourceId, expiresAt });
@@ -137,14 +150,78 @@ export default function AccessPage() {
               Wallet required
             </p>
             <p style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6 }}>
-              Connect a wallet using the button in the top right to generate a
-              payment intent for this resource.
+              Connect a wallet using the button in the top right before
+              unlocking this resource.
             </p>
           </div>
         )}
 
+        {/* Idle */}
+        {state.phase === "idle" && address && (
+          <div
+            style={{
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              padding: "32px 24px",
+            }}
+          >
+            <p
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 11,
+                color: "var(--text-muted)",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                marginBottom: 10,
+              }}
+            >
+              Resource
+            </p>
+            <h1
+              style={{
+                fontSize: 20,
+                fontWeight: 600,
+                color: "var(--text-primary)",
+                marginBottom: 12,
+                wordBreak: "break-word",
+              }}
+            >
+              {id}
+            </h1>
+            <p
+              style={{
+                fontSize: 13,
+                color: "var(--text-muted)",
+                lineHeight: 1.6,
+                marginBottom: 20,
+              }}
+            >
+              Unlocking will request a payment intent for your connected wallet.
+            </p>
+            <button
+              type="button"
+              onClick={handleUnlockClick}
+              style={{
+                width: "100%",
+                padding: "10px",
+                background: "var(--accent)",
+                color: "#000",
+                border: "none",
+                borderRadius: 4,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              Unlock
+            </button>
+          </div>
+        )}
+
         {/* Loading */}
-        {state.phase === "loading" && (
+        {state.phase === "loading-intent" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <Skeleton height={280} />
             <Skeleton height={280} />
@@ -195,7 +272,7 @@ export default function AccessPage() {
         )}
 
         {/* Ready */}
-        {state.phase === "ready" && (
+        {state.phase === "ready" && address && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <AccessCard
               resource={state.intent.resource}
@@ -205,7 +282,8 @@ export default function AccessPage() {
             />
             <PaymentIntentBox
               intent={state.intent}
-              onUnlocked={(token, rid) => handleUnlocked(token, rid, undefined)}
+              walletAddress={address}
+              onUnlocked={handleUnlocked}
             />
           </div>
         )}

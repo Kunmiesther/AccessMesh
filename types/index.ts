@@ -6,6 +6,11 @@ export type ResourceMeta = {
   name: string;
   type: ResourceType;
   description: string;
+  ownerId?: string;
+  endpoint?: string;
+  priceUSDC?: number;
+  isActive?: boolean;
+  createdAt?: string;
 };
 
 // Payment intent — returned by GET /api/access/[id]
@@ -95,6 +100,11 @@ export type LedgerEntry = {
 export type LedgerResponse = {
   ok: boolean;
   ledger: LedgerEntry[];
+};
+
+export type ResourceListResponse = {
+  ok: boolean;
+  resources: ResourceMeta[];
 };
 
 // Wallet state

@@ -1,96 +1,72 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Navbar } from "@/components/Navbar";
 import { LedgerTable } from "@/components/LedgerTable";
 import { useWallet } from "@/lib/ui/WalletContext";
-import { getLedger } from "@/lib/api";
-import { shortAddress } from "@/lib/ui";
-import type { LedgerEntry } from "@/types";
+import { formatDate, formatUSDC, shortAddress } from "@/lib/ui";
+import { getLedger, getResources } from "@/lib/api";
+import type { LedgerEntry, ResourceMeta } from "@/types";
 
-type FetchState =
+type DashboardState =
   | { status: "idle" }
   | { status: "loading" }
-  | { status: "done"; entries: LedgerEntry[] }
+  | {
+      status: "done";
+      ledger: LedgerEntry[];
+      createdResources: ResourceMeta[];
+    }
   | { status: "error"; message: string };
 
 export default function DashboardPage() {
   const { address, connected } = useWallet();
-  const [fetchState, setFetchState] = useState<FetchState>({ status: "idle" });
-  const [resourceFilter, setResourceFilter] = useState("");
+  const [state, setState] = useState<DashboardState>({ status: "idle" });
 
   useEffect(() => {
     if (!connected || !address) {
-      setFetchState({ status: "idle" });
+      setState({ status: "idle" });
       return;
     }
 
-    setFetchState({ status: "loading" });
+    setState({ status: "loading" });
 
-    getLedger({ wallet: address, limit: 200 })
-      .then((res) => {
-        if (res.ok) {
-          setFetchState({ status: "done", entries: res.ledger });
-        } else {
-          setFetchState({ status: "error", message: "Could not load ledger." });
-        }
+    Promise.all([
+      getLedger({ wallet: address, limit: 200 }),
+      getResources({ ownerWallet: address }),
+    ])
+      .then(([ledgerRes, resourceRes]) => {
+        setState({
+          status: "done",
+          ledger: ledgerRes.ledger,
+          createdResources: resourceRes.resources,
+        });
       })
-      .catch((err: Error) => {
-        setFetchState({ status: "error", message: err.message });
+      .catch((error: Error) => {
+        setState({ status: "error", message: error.message });
       });
   }, [address, connected]);
 
-  const filteredEntries =
-    fetchState.status === "done"
-      ? resourceFilter.trim()
-        ? fetchState.entries.filter((e) =>
-            e.resourceId.includes(resourceFilter.trim()),
-          )
-        : fetchState.entries
+  const purchasedResources = useMemo(() => {
+    if (state.status !== "done") return [];
+
+    const unlocked = state.ledger.filter((entry) =>
+      ["UNLOCKED", "ACCESS_GRANTED", "PAYMENT_CONFIRMED"].includes(entry.status),
+    );
+
+    return Array.from(
+      new Map(unlocked.map((entry) => [entry.resourceId, entry])).values(),
+    );
+  }, [state]);
+
+  const paymentHistory =
+    state.status === "done"
+      ? state.ledger.filter((entry) => entry.status.startsWith("PAYMENT_"))
       : [];
-
-  const unlockedCount =
-    fetchState.status === "done"
-      ? fetchState.entries.filter((e) => e.status === "UNLOCKED").length
-      : 0;
-
-  const totalEntries =
-    fetchState.status === "done" ? fetchState.entries.length : 0;
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
       <Navbar />
-
-      {/* Dashboard hero visual */}
-      <div
-        style={{
-          width: "100%",
-          height: 200,
-          position: "relative",
-          overflow: "hidden",
-          borderBottom: "1px solid var(--border)",
-        }}
-      >
-        <img
-          src="/images/dashboard-visual.jpg"
-          alt=""
-          aria-hidden="true"
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            objectPosition: "center",
-            display: "block",
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            background: "linear-gradient(to bottom, rgba(10,10,10,0.2), var(--bg))",
-          }}
-        />
-      </div>
 
       <main
         style={{
@@ -99,270 +75,336 @@ export default function DashboardPage() {
           padding: "40px 24px 80px",
         }}
       >
-        {/* Page header */}
-        <div
-          style={{
-            marginBottom: 40,
-            display: "flex",
-            alignItems: "flex-start",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            gap: 16,
-          }}
-        >
-          <div>
-            <p
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 11,
-                color: "var(--text-muted)",
-                textTransform: "uppercase",
-                letterSpacing: "0.1em",
-                marginBottom: 8,
-              }}
-            >
-              Activity
-            </p>
-            <h1
-              style={{
-                fontSize: 22,
-                fontWeight: 600,
-                color: "var(--text-primary)",
-                letterSpacing: "-0.02em",
-              }}
-            >
-              Your access history
-            </h1>
-            {connected && address && (
-              <p
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 12,
-                  color: "var(--text-muted)",
-                  marginTop: 6,
-                }}
-              >
-                {shortAddress(address)}
-              </p>
-            )}
-          </div>
-
-          {/* Stat cards */}
-          {fetchState.status === "done" && (
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              {/* Unlocked stat */}
-              <div
-                style={{
-                  background: "var(--surface)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  overflow: "hidden",
-                  minWidth: 140,
-                  position: "relative",
-                }}
-              >
-                <img
-                  src="/images/stat-unlocked.jpg"
-                  alt=""
-                  aria-hidden="true"
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "cover",
-                    opacity: 0.18,
-                    display: "block",
-                  }}
-                />
-                <div style={{ position: "relative", padding: "14px 20px" }}>
-                  <span
-                    style={{
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 28,
-                      fontWeight: 500,
-                      color: "var(--accent)",
-                      display: "block",
-                    }}
-                  >
-                    {unlockedCount}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      color: "var(--text-muted)",
-                      fontFamily: "var(--font-mono)",
-                    }}
-                  >
-                    unlocked
-                  </span>
-                </div>
-              </div>
-
-              {/* Total events stat */}
-              <div
-                style={{
-                  background: "var(--surface)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  overflow: "hidden",
-                  minWidth: 140,
-                  position: "relative",
-                }}
-              >
-                <img
-                  src="/images/stat-events.jpg"
-                  alt=""
-                  aria-hidden="true"
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "cover",
-                    opacity: 0.18,
-                    display: "block",
-                  }}
-                />
-                <div style={{ position: "relative", padding: "14px 20px" }}>
-                  <span
-                    style={{
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 28,
-                      fontWeight: 500,
-                      color: "var(--text-primary)",
-                      display: "block",
-                    }}
-                  >
-                    {totalEntries}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      color: "var(--text-muted)",
-                      fontFamily: "var(--font-mono)",
-                    }}
-                  >
-                    total events
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* No wallet */}
-        {!connected && (
-          <div
+        <header style={{ marginBottom: 32 }}>
+          <p
             style={{
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: 8,
-              padding: "40px 24px",
-              textAlign: "center",
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              color: "var(--text-muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.1em",
+              marginBottom: 8,
             }}
           >
+            Dashboard
+          </p>
+          <h1
+            style={{
+              fontSize: 24,
+              fontWeight: 600,
+              color: "var(--text-primary)",
+              marginBottom: 10,
+            }}
+          >
+            Wallet identity
+          </h1>
+          {connected && address ? (
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                fontFamily: "var(--font-mono)",
+                fontSize: 12,
+                color: "var(--text-secondary)",
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                borderRadius: 4,
+                padding: "7px 10px",
+              }}
+            >
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  background: "var(--accent)",
+                }}
+              />
+              Connected {shortAddress(address)}
+            </div>
+          ) : (
+            <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
+              Connect with a passkey to view wallet activity.
+            </p>
+          )}
+        </header>
+
+        {!connected && (
+          <EmptyPanel
+            title="No wallet connected"
+            body="Return to the entry screen and continue with your passkey."
+            actionHref="/"
+            actionLabel="Connect wallet"
+          />
+        )}
+
+        {connected && state.status === "loading" && (
+          <Panel>
             <p
               style={{
                 fontFamily: "var(--font-mono)",
-                fontSize: 13,
-                color: "var(--text-secondary)",
-                marginBottom: 8,
+                fontSize: 12,
+                color: "var(--text-muted)",
               }}
             >
-              No wallet connected
+              Loading wallet activity...
             </p>
-            <p style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6 }}>
-              Connect a wallet to view your access activity and payment history.
-            </p>
-          </div>
+          </Panel>
         )}
 
-        {/* Connected content */}
-        {connected && (
-          <>
-            {fetchState.status === "done" && fetchState.entries.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <input
-                  type="text"
-                  placeholder="Filter by resource ID..."
-                  value={resourceFilter}
-                  onChange={(e) => setResourceFilter(e.target.value)}
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 12,
-                    background: "var(--surface)",
-                    border: "1px solid var(--border)",
-                    color: "var(--text-primary)",
-                    borderRadius: 4,
-                    padding: "8px 12px",
-                    width: "100%",
-                    maxWidth: 360,
-                    outline: "none",
-                  }}
+        {connected && state.status === "error" && (
+          <Panel>
+            <p style={{ fontSize: 13, color: "var(--error)" }}>
+              {state.message}
+            </p>
+          </Panel>
+        )}
+
+        {connected && state.status === "done" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+            <section>
+              <SectionHeader
+                title="Purchased resources"
+                detail={`${purchasedResources.length} resources`}
+              />
+              {purchasedResources.length > 0 ? (
+                <ResourceIdList entries={purchasedResources} />
+              ) : (
+                <EmptyPanel
+                  title="No purchases yet"
+                  body="Unlocked resources will appear here after settlement verification."
                 />
-              </div>
-            )}
+              )}
+            </section>
 
-            {fetchState.status === "loading" && (
-              <div
-                style={{
-                  background: "var(--surface)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                  height: 200,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 12,
-                    color: "var(--text-muted)",
-                  }}
-                >
-                  Loading activity...
-                </span>
-              </div>
-            )}
+            <section>
+              <SectionHeader
+                title="Created resources"
+                detail={`${state.createdResources.length} resources`}
+              />
+              {state.createdResources.length > 0 ? (
+                <CreatedResourceList resources={state.createdResources} />
+              ) : (
+                <EmptyPanel
+                  title="No created resources"
+                  body="Resources created by this wallet will appear here."
+                />
+              )}
+            </section>
 
-            {fetchState.status === "error" && (
-              <div
-                style={{
-                  background: "var(--surface)",
-                  border: "1px solid #e0525230",
-                  borderRadius: 8,
-                  padding: "24px",
-                }}
-              >
-                <p style={{ fontSize: 13, color: "var(--error)", marginBottom: 12 }}>
-                  {fetchState.message}
-                </p>
-                <button
-                  onClick={() => window.location.reload()}
-                  style={{
-                    fontSize: 12,
-                    background: "transparent",
-                    border: "1px solid var(--border)",
-                    color: "var(--text-secondary)",
-                    borderRadius: 4,
-                    padding: "6px 12px",
-                    cursor: "pointer",
-                  }}
-                >
-                  Retry
-                </button>
-              </div>
-            )}
+            <section>
+              <SectionHeader
+                title="Payment history"
+                detail={`${paymentHistory.length} payment events`}
+              />
+              <LedgerTable entries={paymentHistory} />
+            </section>
 
-            {fetchState.status === "done" && (
-              <LedgerTable entries={filteredEntries} />
-            )}
-          </>
+            <section>
+              <SectionHeader
+                title="Full ledger"
+                detail={`${state.ledger.length} total events`}
+              />
+              <LedgerTable entries={state.ledger} />
+            </section>
+          </div>
         )}
       </main>
     </div>
+  );
+}
+
+function SectionHeader({
+  title,
+  detail,
+}: {
+  title: string;
+  detail: string;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "baseline",
+        justifyContent: "space-between",
+        gap: 12,
+        marginBottom: 12,
+      }}
+    >
+      <h2
+        style={{
+          fontSize: 15,
+          fontWeight: 600,
+          color: "var(--text-primary)",
+        }}
+      >
+        {title}
+      </h2>
+      <span
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 11,
+          color: "var(--text-muted)",
+        }}
+      >
+        {detail}
+      </span>
+    </div>
+  );
+}
+
+function Panel({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        padding: "24px",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function EmptyPanel({
+  title,
+  body,
+  actionHref,
+  actionLabel,
+}: {
+  title: string;
+  body: string;
+  actionHref?: string;
+  actionLabel?: string;
+}) {
+  return (
+    <Panel>
+      <p
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 12,
+          color: "var(--text-secondary)",
+          marginBottom: 6,
+        }}
+      >
+        {title}
+      </p>
+      <p style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6 }}>
+        {body}
+      </p>
+      {actionHref && actionLabel && (
+        <Link
+          href={actionHref}
+          style={{
+            display: "inline-block",
+            marginTop: 14,
+            fontSize: 12,
+            color: "#000",
+            background: "var(--accent)",
+            borderRadius: 4,
+            padding: "7px 12px",
+            textDecoration: "none",
+            fontWeight: 600,
+          }}
+        >
+          {actionLabel}
+        </Link>
+      )}
+    </Panel>
+  );
+}
+
+function ResourceIdList({ entries }: { entries: LedgerEntry[] }) {
+  return (
+    <Panel>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {entries.map((entry) => (
+          <div
+            key={entry.resourceId}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 16,
+            }}
+          >
+            <Link
+              href={`/access/${entry.resourceId}`}
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 12,
+                color: "var(--text-secondary)",
+                textDecoration: "none",
+              }}
+            >
+              {entry.resourceId}
+            </Link>
+            <span
+              style={{
+                fontSize: 12,
+                color: "var(--text-muted)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {formatDate(entry.createdAt)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function CreatedResourceList({ resources }: { resources: ResourceMeta[] }) {
+  return (
+    <Panel>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {resources.map((resource) => (
+          <div
+            key={resource.id}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr auto",
+              gap: 12,
+              alignItems: "center",
+            }}
+          >
+            <div>
+              <p
+                style={{
+                  fontSize: 13,
+                  color: "var(--text-primary)",
+                  fontWeight: 600,
+                  marginBottom: 4,
+                }}
+              >
+                {resource.name}
+              </p>
+              <p
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11,
+                  color: "var(--text-muted)",
+                }}
+              >
+                {resource.type} / {shortAddress(resource.id)}
+              </p>
+            </div>
+            <span
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 12,
+                color: "var(--accent)",
+              }}
+            >
+              {formatUSDC(resource.priceUSDC ?? 0)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </Panel>
   );
 }

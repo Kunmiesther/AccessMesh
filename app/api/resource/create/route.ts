@@ -1,10 +1,49 @@
 import { NextResponse } from "next/server";
 import { jsonError } from "@/lib/http";
-import { InputError } from "@/lib/validation";
-import { createResource } from "@/services/resourceService";
+import { InputError, normalizeOptionalAddress } from "@/lib/validation";
+import { prisma } from "@/lib/prisma";
+import { createResource, listResources } from "@/services/resourceService";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+export async function GET(request: Request) {
+  try {
+    const url = new URL(request.url);
+    const ownerWallet = normalizeOptionalAddress(
+      url.searchParams.get("ownerWallet"),
+    );
+    const includeInactive = url.searchParams.get("includeInactive") === "true";
+
+    if (!ownerWallet) {
+      return jsonError(400, "OWNER_WALLET_REQUIRED", "ownerWallet is required");
+    }
+
+    const owner = await prisma.user.findUnique({
+      where: { walletAddress: ownerWallet },
+    });
+
+    if (!owner) {
+      return NextResponse.json({
+        ok: true,
+        resources: [],
+      });
+    }
+
+    const resources = await listResources({
+      ownerId: owner.id,
+      includeInactive,
+    });
+
+    return NextResponse.json({
+      ok: true,
+      resources,
+    });
+  } catch (error) {
+    console.error(error);
+    return jsonError(400, "RESOURCE_LIST_FAILED", "resources could not be fetched");
+  }
+}
 
 export async function POST(request: Request) {
   try {

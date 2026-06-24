@@ -4,6 +4,7 @@ import type {
   PaymentInitiateRequest,
   PaymentInitiateResponse,
   PaymentVerifyResponse,
+  ResourceListResponse,
   UnlockRequest,
   UnlockResponse,
 } from "@/types";
@@ -49,15 +50,25 @@ export async function getAccessIntent(
   if (opts?.recipientWallet) params.set("recipientWallet", opts.recipientWallet);
   if (opts?.amountUSDC) params.set("amountUSDC", opts.amountUSDC);
 
-  return apiFetch<AccessIntentResponse>(`/api/access/${resourceId}?${params}`);
+  return apiFetch<AccessIntentResponse>(`/api/access/${resourceId}?${params}`, {
+    headers: {
+      "Content-Type": "application/json",
+      "x-wallet-address": wallet,
+    },
+  });
 }
 
 // POST /api/access/unlock
 export async function postUnlock(
   body: UnlockRequest,
+  opts?: { wallet?: string },
 ): Promise<UnlockResponse> {
   return apiFetch<UnlockResponse>("/api/access/unlock", {
     method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(opts?.wallet ? { "x-wallet-address": opts.wallet } : {}),
+    },
     body: JSON.stringify(body),
   });
 }
@@ -94,4 +105,15 @@ export async function getLedger(opts: {
   if (opts.limit) params.set("limit", String(opts.limit));
 
   return apiFetch<LedgerResponse>(`/api/ledger?${params}`);
+}
+
+export async function getResources(opts: {
+  ownerWallet?: string;
+  includeInactive?: boolean;
+}): Promise<ResourceListResponse> {
+  const params = new URLSearchParams();
+  if (opts.ownerWallet) params.set("ownerWallet", opts.ownerWallet);
+  if (opts.includeInactive) params.set("includeInactive", "true");
+
+  return apiFetch<ResourceListResponse>(`/api/resource/create?${params}`);
 }

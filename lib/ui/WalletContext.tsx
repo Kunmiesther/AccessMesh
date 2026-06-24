@@ -8,49 +8,95 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import {
+  initWallet,
+  type ModularWalletSession,
+} from "@/lib/modular-wallet";
+import { getAddress, isAddress } from "viem";
 
 type WalletContextValue = {
-  address: string | null;
+  address: ModularWalletSession["address"] | null;
+  smartAccount: ModularWalletSession["smartAccount"] | null;
+  bundlerClient: ModularWalletSession["bundlerClient"] | null;
   connected: boolean;
-  connect: (address: string) => void;
+  loading: boolean;
+  error: string | null;
+  connectWallet: (username: string) => Promise<ModularWalletSession>;
   disconnect: () => void;
 };
 
 const WalletContext = createContext<WalletContextValue>({
   address: null,
+  smartAccount: null,
+  bundlerClient: null,
   connected: false,
-  connect: () => {},
+  loading: false,
+  error: null,
+  connectWallet: async () => {
+    throw new Error("WalletProvider is not mounted.");
+  },
   disconnect: () => {},
 });
 
-const STORAGE_KEY = "accessmesh_wallet";
+const STORAGE_KEY = "accessmesh_modular_wallet_address";
 
 export function WalletProvider({ children }: { children: ReactNode }) {
-  const [address, setAddress] = useState<string | null>(null);
+  const [address, setAddress] =
+    useState<ModularWalletSession["address"] | null>(null);
+  const [smartAccount, setSmartAccount] =
+    useState<ModularWalletSession["smartAccount"] | null>(null);
+  const [bundlerClient, setBundlerClient] =
+    useState<ModularWalletSession["bundlerClient"] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     try {
-      const stored = sessionStorage.getItem(STORAGE_KEY);
-      if (stored) setAddress(stored);
+      const stored = window.localStorage.getItem(STORAGE_KEY);
+      if (stored && isAddress(stored)) {
+        setAddress(getAddress(stored) as ModularWalletSession["address"]);
+      } else if (stored) {
+        window.localStorage.removeItem(STORAGE_KEY);
+      }
     } catch {
       // storage unavailable
     }
   }, []);
 
-  const connect = useCallback((addr: string) => {
-    const normalised = addr.trim().toLowerCase();
-    setAddress(normalised);
+  const connectWallet = useCallback(async (username: string) => {
+    setLoading(true);
+    setError(null);
+
     try {
-      sessionStorage.setItem(STORAGE_KEY, normalised);
-    } catch {
-      // storage unavailable
+      const session = await initWallet(username);
+      setAddress(session.address);
+      setSmartAccount(session.smartAccount);
+      setBundlerClient(session.bundlerClient);
+
+      try {
+        window.localStorage.setItem(STORAGE_KEY, session.address);
+      } catch {
+        // storage unavailable
+      }
+
+      return session;
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to initialize wallet.";
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
     }
   }, []);
 
   const disconnect = useCallback(() => {
     setAddress(null);
+    setSmartAccount(null);
+    setBundlerClient(null);
+    setError(null);
     try {
-      sessionStorage.removeItem(STORAGE_KEY);
+      window.localStorage.removeItem(STORAGE_KEY);
     } catch {
       // storage unavailable
     }
@@ -58,7 +104,16 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   return (
     <WalletContext.Provider
-      value={{ address, connected: !!address, connect, disconnect }}
+      value={{
+        address,
+        smartAccount,
+        bundlerClient,
+        connected: !!address,
+        loading,
+        error,
+        connectWallet,
+        disconnect,
+      }}
     >
       {children}
     </WalletContext.Provider>

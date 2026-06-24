@@ -1,30 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
 import { useWallet } from "@/lib/ui/WalletContext";
 import { shortAddress } from "@/lib/ui";
 
 export function Navbar() {
-  const { address, connected, connect, disconnect } = useWallet();
-  const [showInput, setShowInput] = useState(false);
-  const [inputValue, setInputValue] = useState("");
-  const [error, setError] = useState("");
-
-  function handleConnect() {
-    if (!inputValue.trim()) {
-      setError("Enter a wallet address.");
-      return;
-    }
-    if (!/^0x[0-9a-fA-F]{40}$/.test(inputValue.trim())) {
-      setError("Invalid EVM address format.");
-      return;
-    }
-    connect(inputValue.trim());
-    setShowInput(false);
-    setInputValue("");
-    setError("");
-  }
+  const { address, connected, disconnect } = useWallet();
 
   return (
     <nav
@@ -50,7 +31,6 @@ export function Navbar() {
           gap: 24,
         }}
       >
-        {/* Logo */}
         <Link
           href="/"
           style={{
@@ -59,17 +39,16 @@ export function Navbar() {
             fontWeight: 500,
             color: "var(--text-primary)",
             textDecoration: "none",
-            letterSpacing: "-0.02em",
+            letterSpacing: "0",
             display: "flex",
             alignItems: "center",
             gap: 8,
           }}
         >
-          <span style={{ color: "var(--accent)" }}>◈</span>
+          <span style={{ color: "var(--accent)" }}>●</span>
           AccessMesh
         </Link>
 
-        {/* Right side */}
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {connected && address ? (
             <>
@@ -81,19 +60,11 @@ export function Navbar() {
                   textDecoration: "none",
                   padding: "4px 10px",
                   borderRadius: 4,
-                  transition: "color 0.15s",
                 }}
-                onMouseOver={(e) =>
-                  (e.currentTarget.style.color = "var(--text-primary)")
-                }
-                onMouseOut={(e) =>
-                  (e.currentTarget.style.color = "var(--text-secondary)")
-                }
               >
-                Activity
+                Dashboard
               </Link>
-              <button
-                onClick={disconnect}
+              <div
                 style={{
                   fontFamily: "var(--font-mono)",
                   fontSize: 12,
@@ -102,22 +73,13 @@ export function Navbar() {
                   border: "1px solid var(--border)",
                   borderRadius: 4,
                   padding: "5px 10px",
-                  cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
                   gap: 6,
-                  transition: "border-color 0.15s, color 0.15s",
-                }}
-                onMouseOver={(e) => {
-                  e.currentTarget.style.borderColor = "var(--error)";
-                  e.currentTarget.style.color = "var(--error)";
-                }}
-                onMouseOut={(e) => {
-                  e.currentTarget.style.borderColor = "var(--border)";
-                  e.currentTarget.style.color = "var(--text-secondary)";
                 }}
               >
                 <span
+                  aria-hidden="true"
                   style={{
                     width: 6,
                     height: 6,
@@ -127,84 +89,26 @@ export function Navbar() {
                   }}
                 />
                 {shortAddress(address)}
-              </button>
-            </>
-          ) : showInput ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                <input
-                  autoFocus
-                  type="text"
-                  placeholder="0x..."
-                  value={inputValue}
-                  onChange={(e) => {
-                    setInputValue(e.target.value);
-                    setError("");
-                  }}
-                  onKeyDown={(e) => e.key === "Enter" && handleConnect()}
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 12,
-                    background: "var(--surface)",
-                    border: `1px solid ${error ? "var(--error)" : "var(--border)"}`,
-                    color: "var(--text-primary)",
-                    borderRadius: 4,
-                    padding: "5px 10px",
-                    width: 280,
-                    outline: "none",
-                  }}
-                />
-                {error && (
-                  <span
-                    style={{ fontSize: 11, color: "var(--error)", paddingLeft: 2 }}
-                  >
-                    {error}
-                  </span>
-                )}
               </div>
               <button
-                onClick={handleConnect}
+                type="button"
+                onClick={disconnect}
                 style={{
                   fontSize: 12,
-                  background: "var(--accent)",
-                  color: "#000",
-                  border: "none",
-                  borderRadius: 4,
-                  padding: "6px 12px",
-                  cursor: "pointer",
-                  fontWeight: 500,
-                  transition: "background 0.15s",
-                  whiteSpace: "nowrap",
-                }}
-                onMouseOver={(e) =>
-                  (e.currentTarget.style.background = "var(--accent-hover)")
-                }
-                onMouseOut={(e) =>
-                  (e.currentTarget.style.background = "var(--accent)")
-                }
-              >
-                Connect
-              </button>
-              <button
-                onClick={() => {
-                  setShowInput(false);
-                  setError("");
-                }}
-                style={{
-                  fontSize: 12,
-                  background: "transparent",
                   color: "var(--text-muted)",
-                  border: "none",
+                  background: "transparent",
+                  border: "1px solid var(--border)",
+                  borderRadius: 4,
+                  padding: "5px 10px",
                   cursor: "pointer",
-                  padding: "5px 4px",
                 }}
               >
-                ✕
+                Disconnect
               </button>
-            </div>
+            </>
           ) : (
-            <button
-              onClick={() => setShowInput(true)}
+            <Link
+              href="/"
               style={{
                 fontSize: 13,
                 background: "var(--surface)",
@@ -212,20 +116,11 @@ export function Navbar() {
                 border: "1px solid var(--border)",
                 borderRadius: 4,
                 padding: "6px 14px",
-                cursor: "pointer",
-                transition: "border-color 0.15s, transform 0.1s",
-              }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.borderColor = "var(--accent)";
-                e.currentTarget.style.transform = "scale(0.98)";
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.borderColor = "var(--border)";
-                e.currentTarget.style.transform = "scale(1)";
+                textDecoration: "none",
               }}
             >
               Connect wallet
-            </button>
+            </Link>
           )}
         </div>
       </div>

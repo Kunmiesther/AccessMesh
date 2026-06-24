@@ -97,12 +97,14 @@ export async function createAccessPaymentIntent(params: {
 export async function unlockAccess(params: {
   accessId: string;
   txHash: string;
+  payerWallet?: string | null;
 }) {
   const accessId = requireString(params.accessId, "accessId");
   const txHash = normalizeTxHash(params.txHash);
   const intent = await resolveAccessIntent(accessId);
 
   assertIntentActive(intent);
+  assertWalletMatchesIntent(params.payerWallet, intent.payerWallet);
 
   const payment = await reservePayment({
     txHash,
@@ -411,6 +413,20 @@ async function settlePayment(params: {
 function assertIntentActive(intent: AccessIntent) {
   if (Date.now() > new Date(intent.expiresAt).getTime()) {
     throw new InputError("accessId has expired");
+  }
+}
+
+function assertWalletMatchesIntent(
+  walletInput: string | null | undefined,
+  intentWallet: Address,
+) {
+  if (!walletInput) {
+    throw new InputError("wallet identity is required");
+  }
+
+  const connectedWallet = normalizeAddress(walletInput, "wallet");
+  if (connectedWallet !== intentWallet) {
+    throw new InputError("wallet identity does not match access intent");
   }
 }
 

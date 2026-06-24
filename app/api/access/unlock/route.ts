@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { jsonError } from "@/lib/http";
-import { InputError } from "@/lib/validation";
+import { getWalletFromRequest, InputError } from "@/lib/validation";
 import { unlockAccess } from "@/services/accessFlowService";
 
 export const runtime = "nodejs";
@@ -12,6 +12,7 @@ export async function POST(request: Request) {
     const result = await unlockAccess({
       accessId: body.accessId,
       txHash: body.txHash,
+      payerWallet: getWalletFromRequest(request),
     });
 
     const status = result.ok

@@ -6,12 +6,13 @@ import { postUnlock } from "@/lib/api";
 
 type Props = {
   intent: PaymentIntent;
+  walletAddress: string;
   onUnlocked: (accessToken: string, resourceId: string) => void;
 };
 
 type Step = "idle" | "submitting" | "verifying" | "confirming" | "error";
 
-export function PaymentIntentBox({ intent, onUnlocked }: Props) {
+export function PaymentIntentBox({ intent, walletAddress, onUnlocked }: Props) {
   const [txHash, setTxHash] = useState("");
   const [step, setStep] = useState<Step>("idle");
   const [errorMsg, setErrorMsg] = useState("");
@@ -33,10 +34,15 @@ export function PaymentIntentBox({ intent, onUnlocked }: Props) {
 
     try {
       setStep("verifying");
-      const result = await postUnlock({
-        accessId: intent.accessId,
-        txHash: hash,
-      });
+      const result = await postUnlock(
+        {
+          accessId: intent.accessId,
+          txHash: hash,
+        },
+        {
+          wallet: walletAddress,
+        },
+      );
 
       if (result.ok && result.accessToken && result.resourceId) {
         onUnlocked(result.accessToken, result.resourceId);
