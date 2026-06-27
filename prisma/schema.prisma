@@ -12,18 +12,36 @@ model User {
   walletAddress String   @unique
   role          String   // CONSUMER | PROVIDER
   createdAt     DateTime @default(now())
+
+  resources Resource[]
 }
 
 model Resource {
-  id            String   @id @default(cuid())
-  ownerId       String
-  name          String
-  type          String   // API | CONTENT | TOOL | DATASET
-  endpoint      String
-  description   String
-  priceUSDC     Float
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
+  id             String   @id @default(cuid())
+  ownerId        String
+  creatorWallet  String   @default("")
+  title          String   @default("")
+  name           String
+  category       String   @default("CONTENT")
+  type           String   // API | CONTENT | TOOL | DATASET
+  description    String
+  priceUSDC      Float
+  resourceUrl    String   @default("")
+  endpoint       String
+  coverImage     String?
+  tags           String   @default("[]")
+  unlockCount    Int      @default(0)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  owner          User     @relation(fields: [ownerId], references: [id])
+  payments       Payment[]
+  purchases      Purchase[]
+  activityEvents ActivityEvent[]
+  x402AccessLogs X402AccessLog[]
+
+  @@index([creatorWallet])
+  @@index([createdAt])
 }
 
 model Payment {
@@ -35,6 +53,30 @@ model Payment {
   txHash          String   @unique
   status          String   // PENDING | CONFIRMING | SETTLED | FAILED
   createdAt       DateTime @default(now())
+
+  resource        Resource @relation(fields: [resourceId], references: [id])
+
+  @@index([payerWallet])
+  @@index([providerWallet])
+  @@index([resourceId])
+}
+
+model Purchase {
+  id            String   @id @default(cuid())
+  resourceId    String
+  buyerWallet   String
+  creatorWallet String
+  amountUSDC    Float
+  txHash        String   @unique
+  createdAt     DateTime @default(now())
+
+  resource      Resource @relation(fields: [resourceId], references: [id])
+
+  @@unique([resourceId, buyerWallet])
+  @@index([buyerWallet])
+  @@index([creatorWallet])
+  @@index([resourceId])
+  @@index([createdAt])
 }
 
 model AccessLog {
@@ -44,4 +86,34 @@ model AccessLog {
   status      String   // BLOCKED | UNLOCKED
   txHash      String?
   createdAt   DateTime @default(now())
+}
+
+model ActivityEvent {
+  id        String   @id @default(cuid())
+  type      String   // RESOURCE_PUBLISHED | RESOURCE_UNLOCKED | PROTECTED_RESOURCE_ACCESSED
+  wallet    String
+  resourceId String
+  title     String
+  txHash    String?
+  createdAt DateTime @default(now())
+
+  resource Resource @relation(fields: [resourceId], references: [id])
+
+  @@index([createdAt])
+  @@index([wallet])
+  @@index([resourceId])
+}
+
+model X402AccessLog {
+  id         String   @id @default(cuid())
+  wallet     String
+  resourceId String
+  result     String   // SUCCESS | FAILED
+  createdAt  DateTime @default(now())
+
+  resource Resource @relation(fields: [resourceId], references: [id])
+
+  @@index([wallet])
+  @@index([resourceId])
+  @@index([createdAt])
 }

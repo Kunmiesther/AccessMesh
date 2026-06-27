@@ -9,6 +9,7 @@ import {
   normalizeTxHash,
   parsePositiveUsdcAmount,
 } from "@/lib/validation";
+import { ActivityType } from "@/services/activityService";
 import { verifySettlement } from "@/services/arcVerifier";
 import { LedgerStatus, logAccessDenied, logEvent } from "@/services/ledgerService";
 
@@ -179,7 +180,7 @@ export async function unlockAccess(params: {
     };
   }
 
-  await settlePayment({
+  const settlement = await settlePayment({
     txHash,
     resourceId: intent.resourceId,
     payerWallet: intent.payerWallet,
@@ -200,6 +201,7 @@ export async function unlockAccess(params: {
     expiresAt: token.expiresAt,
     resourceId: intent.resourceId,
     txHash,
+    purchase: settlement.purchase,
     verification,
   };
 }
@@ -373,7 +375,23 @@ async function settlePayment(params: {
   resourceId: string;
   payerWallet: Address;
 }) {
-  await prisma.$transaction(async (tx) => {
+  const settlement = await prisma.$transaction(async (tx) => {
+    const payment = await tx.payment.findUnique({
+      where: { txHash: params.txHash },
+    });
+
+    if (!payment) {
+      throw new InputError("payment not found for txHash");
+    }
+
+    const resource = await tx.resource.findUnique({
+      where: { id: params.resourceId },
+    });
+
+    if (!resource || !resource.isActive) {
+      throw new InputError("resource not found or inactive");
+    }
+
     const duplicateSettlement = await tx.payment.findFirst({
       where: {
         resourceId: params.resourceId,
@@ -387,10 +405,48 @@ async function settlePayment(params: {
       throw new InputError("access is already settled with another txHash");
     }
 
-    await tx.payment.update({
+    const settledPayment = await tx.payment.update({
       where: { txHash: params.txHash },
       data: { status: "SETTLED" },
     });
+
+    const existingPurchase = await tx.purchase.findUnique({
+      where: {
+        resourceId_buyerWallet: {
+          resourceId: params.resourceId,
+          buyerWallet: params.payerWallet,
+        },
+      },
+    });
+
+    const purchase =
+      existingPurchase ??
+      (await tx.purchase.create({
+        data: {
+          resourceId: params.resourceId,
+          buyerWallet: params.payerWallet,
+          creatorWallet: payment.providerWallet,
+          amountUSDC: payment.amountUSDC,
+          txHash: params.txHash,
+        },
+      }));
+
+    if (!existingPurchase) {
+      await tx.resource.update({
+        where: { id: params.resourceId },
+        data: { unlockCount: { increment: 1 } },
+      });
+
+      await tx.activityEvent.create({
+        data: {
+          type: ActivityType.ResourceUnlocked,
+          wallet: params.payerWallet,
+          resourceId: params.resourceId,
+          title: resource.title || resource.name,
+          txHash: params.txHash,
+        },
+      });
+    }
 
     await tx.accessLog.create({
       data: {
@@ -400,6 +456,20 @@ async function settlePayment(params: {
         status: LedgerStatus.Unlocked,
       },
     });
+
+    return {
+      payment: settledPayment,
+      purchase: {
+        id: purchase.id,
+        resourceId: purchase.resourceId,
+        resourceTitle: resource.title || resource.name,
+        buyerWallet: purchase.buyerWallet,
+        creatorWallet: purchase.creatorWallet,
+        amountUSDC: purchase.amountUSDC,
+        txHash: purchase.txHash,
+        timestamp: purchase.createdAt.toISOString(),
+      },
+    };
   });
 
   await logEvent({
@@ -408,6 +478,15 @@ async function settlePayment(params: {
     txHash: params.txHash,
     status: LedgerStatus.PaymentConfirmed,
   });
+
+  await logEvent({
+    resourceId: params.resourceId,
+    payerWallet: params.payerWallet,
+    txHash: params.txHash,
+    status: LedgerStatus.AccessGranted,
+  });
+
+  return settlement;
 }
 
 function assertIntentActive(intent: AccessIntent) {

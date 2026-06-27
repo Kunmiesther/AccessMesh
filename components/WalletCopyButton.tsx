@@ -1,12 +1,14 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 
 type Props = {
   address: string;
+  buttonStyle?: CSSProperties;
 };
 
-export function WalletCopyButton({ address }: Props) {
+export function WalletCopyButton({ address, buttonStyle }: Props) {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -19,8 +21,12 @@ export function WalletCopyButton({ address }: Props) {
   }, [copied]);
 
   async function copyAddress() {
-    await navigator.clipboard.writeText(address);
-    setCopied(true);
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
   }
 
   return (
@@ -41,11 +47,32 @@ export function WalletCopyButton({ address }: Props) {
           border: "1px solid var(--border)",
           borderRadius: 4,
           cursor: "pointer",
+          ...buttonStyle,
         }}
       >
-        <span aria-hidden="true" style={{ fontSize: 15, lineHeight: 1 }}>
-          ⧉
-        </span>
+        <svg
+          aria-hidden="true"
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+        >
+          <rect
+            x="5.25"
+            y="5.25"
+            width="7.5"
+            height="7.5"
+            rx="1.5"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          />
+          <path
+            d="M3.25 10.25V4.75C3.25 3.92 3.92 3.25 4.75 3.25H10.25"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+        </svg>
       </button>
 
       {copied && (

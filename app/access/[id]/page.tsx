@@ -15,12 +15,18 @@ type PageState =
   | { phase: "idle" }
   | { phase: "loading-intent" }
   | { phase: "ready"; intent: PaymentIntent }
-  | { phase: "unlocked"; accessToken: string; resourceId: string; expiresAt?: string }
+  | {
+      phase: "unlocked";
+      accessToken: string;
+      resourceId: string;
+      txHash: string;
+      expiresAt?: string;
+    }
   | { phase: "error"; message: string };
 
 export default function AccessPage() {
   const { id } = useParams<{ id: string }>();
-  const { address, connected } = useWallet();
+  const { address, connected, smartAccount, bundlerClient } = useWallet();
   const [state, setState] = useState<PageState>({ phase: "no-wallet" });
 
   useEffect(() => {
@@ -56,8 +62,13 @@ export default function AccessPage() {
     }
   }
 
-  function handleUnlocked(accessToken: string, resourceId: string, expiresAt?: string) {
-    setState({ phase: "unlocked", accessToken, resourceId, expiresAt });
+  function handleUnlocked(
+    accessToken: string,
+    resourceId: string,
+    txHash: string,
+    expiresAt?: string,
+  ) {
+    setState({ phase: "unlocked", accessToken, resourceId, txHash, expiresAt });
   }
 
   return (
@@ -283,6 +294,8 @@ export default function AccessPage() {
             <PaymentIntentBox
               intent={state.intent}
               walletAddress={address}
+              smartAccount={smartAccount}
+              bundlerClient={bundlerClient}
               onUnlocked={handleUnlocked}
             />
           </div>
@@ -293,6 +306,7 @@ export default function AccessPage() {
           <UnlockStatusTracker
             accessToken={state.accessToken}
             resourceId={state.resourceId}
+            txHash={state.txHash}
             expiresAt={state.expiresAt}
           />
         )}

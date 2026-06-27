@@ -1,43 +1,40 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { listRecentActivity } from "@/services/activityService";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const activity = await prisma.accessLog.findMany({
-    where: {
-      status: {
-        in: ["UNLOCKED", "ACCESS_GRANTED", "PAYMENT_CONFIRMED"],
-      },
-    },
-    orderBy: { createdAt: "desc" },
-    take: 10,
-  });
-
-  const resourceIds = Array.from(
-    new Set(activity.map((entry) => entry.resourceId)),
-  );
-  const resources = await prisma.resource.findMany({
-    where: { id: { in: resourceIds } },
-    select: { id: true, name: true, type: true },
-  });
-  const resourcesById = new Map(
-    resources.map((resource) => [resource.id, resource]),
-  );
+  const activity = await listRecentActivity(10);
 
   return NextResponse.json({
     ok: true,
     activity: activity.map((entry) => ({
       id: entry.id,
+      type: entry.type,
+      wallet: entry.wallet,
       resourceId: entry.resourceId,
-      resourceName:
-        resourcesById.get(entry.resourceId)?.name ?? entry.resourceId,
-      resourceType: resourcesById.get(entry.resourceId)?.type ?? "CONTENT",
-      payerWallet: entry.payerWallet,
-      status: entry.status,
+      resourceTitle: entry.title || entry.resource.title || entry.resource.name,
+      resourceName: entry.resource.title || entry.resource.name,
+      resourceType: normalizeResourceType(
+        entry.resource.type || entry.resource.category,
+      ),
+      payerWallet: entry.wallet,
       txHash: entry.txHash,
-      createdAt: entry.createdAt,
+      createdAt: entry.createdAt.toISOString(),
     })),
   });
+}
+
+function normalizeResourceType(value: string) {
+  if (
+    value === "API" ||
+    value === "CONTENT" ||
+    value === "TOOL" ||
+    value === "DATASET"
+  ) {
+    return value;
+  }
+
+  return "CONTENT";
 }

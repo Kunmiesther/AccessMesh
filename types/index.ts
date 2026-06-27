@@ -1,19 +1,46 @@
-// Resource types
 export type ResourceType = "API" | "CONTENT" | "TOOL" | "DATASET";
+
+export type ActivityEventType =
+  | "RESOURCE_PUBLISHED"
+  | "RESOURCE_UNLOCKED"
+  | "PROTECTED_RESOURCE_ACCESSED";
+
+export type SortMode = "newest" | "price-asc" | "price-desc";
 
 export type ResourceMeta = {
   id: string;
+  creatorWallet: string;
+  title: string;
   name: string;
-  type: ResourceType;
   description: string;
-  ownerId?: string;
+  category: ResourceType;
+  type: ResourceType;
+  priceUSDC: number;
+  resourceUrl?: string;
   endpoint?: string;
-  priceUSDC?: number;
-  isActive?: boolean;
-  createdAt?: string;
+  coverImage?: string | null;
+  tags: string[];
+  unlockCount: number;
+  isActive: boolean;
+  createdAt: string;
 };
 
-// Payment intent — returned by GET /api/access/[id]
+export type ResourceDetail = ResourceMeta & {
+  owned: boolean;
+  purchase?: PurchaseProof | null;
+};
+
+export type PurchaseProof = {
+  id: string;
+  resourceId: string;
+  resourceTitle: string;
+  buyerWallet: string;
+  creatorWallet: string;
+  amountUSDC: number;
+  txHash: string;
+  timestamp: string;
+};
+
 export type PaymentIntent = {
   accessId: string;
   amountUSDC: number;
@@ -21,7 +48,7 @@ export type PaymentIntent = {
   expiresAt: string;
   payerWallet: string;
   resource: ResourceMeta;
-  payment: unknown; // Circle send requirement — passed through to Arc SDK
+  payment: unknown;
 };
 
 export type AccessIntentResponse = {
@@ -29,10 +56,10 @@ export type AccessIntentResponse = {
   paymentIntent: PaymentIntent;
 };
 
-// Unlock — POST /api/access/unlock
 export type UnlockRequest = {
   accessId: string;
   txHash: string;
+  mockPayment?: boolean;
 };
 
 export type UnlockResponse = {
@@ -43,6 +70,7 @@ export type UnlockResponse = {
   expiresAt?: string;
   resourceId?: string;
   txHash?: string;
+  purchase?: PurchaseProof;
   payment?: {
     id: string;
     status: string;
@@ -56,7 +84,6 @@ export type UnlockResponse = {
   };
 };
 
-// Payment initiate — POST /api/payment/initiate
 export type PaymentInitiateRequest = {
   resourceId: string;
   wallet: string;
@@ -73,7 +100,6 @@ export type PaymentInitiateResponse = {
   paymentRequired: PaymentRequirement;
 };
 
-// Payment verify — POST /api/payment/verify
 export type PaymentVerifyResponse = {
   ok: boolean;
   payment: {
@@ -87,7 +113,6 @@ export type PaymentVerifyResponse = {
   };
 };
 
-// Ledger — GET /api/ledger
 export type LedgerEntry = {
   id: string;
   resourceId: string;
@@ -107,6 +132,35 @@ export type ResourceListResponse = {
   resources: ResourceMeta[];
 };
 
+export type PurchaseListResponse = {
+  ok: boolean;
+  purchases: PurchaseProof[];
+  paymentHistory: PurchaseProof[];
+};
+
+export type ResourceDetailResponse = {
+  ok: boolean;
+  resource: ResourceDetail;
+};
+
+export type CreateResourceRequest = {
+  creatorWallet: string;
+  title: string;
+  description: string;
+  category: ResourceType;
+  priceUSDC: number | string;
+  resourceUrl?: string;
+  fileName?: string;
+  fileDataUrl?: string;
+  coverImage?: string;
+  tags?: string[] | string;
+};
+
+export type CreateResourceResponse = {
+  ok: boolean;
+  resource: ResourceMeta;
+};
+
 export type ProtocolStats = {
   totalResources: number;
   totalUnlocks: number;
@@ -121,11 +175,13 @@ export type ProtocolStatsResponse = {
 
 export type RecentActivityEntry = {
   id: string;
+  type: ActivityEventType;
+  wallet: string;
+  payerWallet: string;
   resourceId: string;
+  resourceTitle: string;
   resourceName: string;
   resourceType: ResourceType;
-  payerWallet: string;
-  status: string;
   txHash: string | null;
   createdAt: string;
 };
@@ -135,7 +191,53 @@ export type RecentActivityResponse = {
   activity: RecentActivityEntry[];
 };
 
-// Wallet state
+export type CreatorAnalytics = {
+  revenueEarned: number;
+  resourcesPublished: number;
+  totalUnlocks: number;
+  topResource: {
+    id: string;
+    title: string;
+    revenue: number;
+    unlockCount: number;
+  } | null;
+  x402: {
+    protectedRequests: number;
+    successfulAccesses: number;
+    failedAccesses: number;
+    conversionRate: number;
+  };
+};
+
+export type CreatedResourceSummary = ResourceMeta & {
+  revenue: number;
+};
+
+export type DashboardResponse = {
+  ok: boolean;
+  stats?: ProtocolStats;
+  analytics: CreatorAnalytics;
+  purchasedResources: PurchaseProof[];
+  createdResources: CreatedResourceSummary[];
+  paymentHistory: PurchaseProof[];
+};
+
+export type UnlockInitiateResponse = {
+  ok: boolean;
+  paymentIntent: PaymentIntent;
+};
+
+export type ProtectedContentResponse = {
+  ok: boolean;
+  content: {
+    resourceId: string;
+    title: string;
+    resourceUrl: string;
+    openUrl: string;
+    deliveredVia: "x402-access-layer";
+  };
+};
+
 export type WalletState = {
   address: string | null;
   connected: boolean;

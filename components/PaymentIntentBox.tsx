@@ -1,38 +1,64 @@
 "use client";
 
 import { useState } from "react";
-import type { PaymentIntent } from "@/types";
+import { ArcTestnet } from "@circle-fin/app-kit/chains";
+import {
+  encodeFunctionData,
+  erc20Abi,
+  parseUnits,
+  type Address,
+  type Hash,
+} from "viem";
 import { postUnlock } from "@/lib/api";
+import type { ModularWalletSession } from "@/lib/modular-wallet";
+import type { PaymentIntent } from "@/types";
 
 type Props = {
   intent: PaymentIntent;
   walletAddress: string;
-  onUnlocked: (accessToken: string, resourceId: string) => void;
+  smartAccount: ModularWalletSession["smartAccount"] | null;
+  bundlerClient: ModularWalletSession["bundlerClient"] | null;
+  onUnlocked: (
+    accessToken: string,
+    resourceId: string,
+    txHash: string,
+    expiresAt?: string,
+  ) => void;
 };
 
-type Step = "idle" | "submitting" | "verifying" | "confirming" | "error";
+type Step = "idle" | "paying" | "verifying" | "confirming" | "error";
 
-export function PaymentIntentBox({ intent, walletAddress, onUnlocked }: Props) {
-  const [txHash, setTxHash] = useState("");
+export function PaymentIntentBox({
+  intent,
+  walletAddress,
+  smartAccount,
+  bundlerClient,
+  onUnlocked,
+}: Props) {
   const [step, setStep] = useState<Step>("idle");
+  const [txHash, setTxHash] = useState<Hash | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
   const [confirmingMsg, setConfirmingMsg] = useState("");
 
-  async function handleSubmit() {
-    const hash = txHash.trim();
-    if (!hash) {
-      setErrorMsg("Paste the transaction hash from your Arc USDC transfer.");
-      return;
-    }
-    if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) {
-      setErrorMsg("Invalid transaction hash format. Must be 0x followed by 64 hex characters.");
+  async function handleUnlock() {
+    if (!smartAccount || !bundlerClient) {
+      setErrorMsg("Reconnect your Circle Modular Wallet before unlocking.");
       return;
     }
 
-    setStep("submitting");
+    setStep("paying");
     setErrorMsg("");
+    setConfirmingMsg("");
+    setTxHash(null);
 
     try {
+      const hash = await executeUsdcPayment({
+        bundlerClient,
+        recipientWallet: intent.recipientWallet as Address,
+        amountUSDC: intent.amountUSDC,
+      });
+      setTxHash(hash);
+
       setStep("verifying");
       const result = await postUnlock(
         {
@@ -45,7 +71,12 @@ export function PaymentIntentBox({ intent, walletAddress, onUnlocked }: Props) {
       );
 
       if (result.ok && result.accessToken && result.resourceId) {
-        onUnlocked(result.accessToken, result.resourceId);
+        onUnlocked(
+          result.accessToken,
+          result.resourceId,
+          result.txHash ?? hash,
+          result.expiresAt,
+        );
         return;
       }
 
@@ -69,12 +100,12 @@ export function PaymentIntentBox({ intent, walletAddress, onUnlocked }: Props) {
     } catch (err: unknown) {
       setStep("error");
       setErrorMsg(
-        err instanceof Error ? err.message : "Verification request failed.",
+        err instanceof Error ? err.message : "Payment or verification failed.",
       );
     }
   }
 
-  const isLoading = step === "submitting" || step === "verifying";
+  const isLoading = step === "paying" || step === "verifying";
 
   return (
     <div
@@ -85,7 +116,6 @@ export function PaymentIntentBox({ intent, walletAddress, onUnlocked }: Props) {
         overflow: "hidden",
       }}
     >
-      {/* Receipt header */}
       <div
         style={{
           padding: "14px 20px",
@@ -117,7 +147,6 @@ export function PaymentIntentBox({ intent, walletAddress, onUnlocked }: Props) {
         </span>
       </div>
 
-      {/* Receipt body */}
       <div
         style={{
           padding: "20px",
@@ -135,10 +164,9 @@ export function PaymentIntentBox({ intent, walletAddress, onUnlocked }: Props) {
           label="FROM"
           value={`${intent.payerWallet.slice(0, 10)}...${intent.payerWallet.slice(-8)}`}
         />
-        <ReceiptLine label="INTENT" value={intent.accessId.slice(0, 20) + "..."} />
+        <ReceiptLine label="INTENT" value={`${intent.accessId.slice(0, 20)}...`} />
       </div>
 
-      {/* Instructions */}
       {step !== "confirming" && (
         <div
           style={{
@@ -148,24 +176,21 @@ export function PaymentIntentBox({ intent, walletAddress, onUnlocked }: Props) {
           }}
         >
           <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-            Send exactly{" "}
+            Unlock executes a Circle Modular Wallet transfer for exactly{" "}
             <span style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
               {intent.amountUSDC.toFixed(2)} USDC
             </span>{" "}
-            to the address above using Arc. Once your transfer is complete, paste the transaction
-            hash below to unlock access.
+            to the creator on Arc, then verifies settlement and grants access automatically.
           </p>
         </div>
       )}
 
-      {/* Confirming state */}
       {step === "confirming" && (
         <div
           style={{
             padding: "20px",
             borderBottom: "1px solid var(--border)",
             background: "#c8972a10",
-            border: "1px solid #c8972a30",
           }}
         >
           <p
@@ -176,55 +201,44 @@ export function PaymentIntentBox({ intent, walletAddress, onUnlocked }: Props) {
               lineHeight: 1.6,
             }}
           >
-            ◌ CONFIRMING — {confirmingMsg}
+            Confirming - {confirmingMsg}
           </p>
           <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, lineHeight: 1.5 }}>
-            Your payment has been received. Access will be granted once the transaction is
-            confirmed on-chain. You can revisit this page or check your activity on the dashboard.
+            Your payment was submitted. Access will be granted once Arc verification reports
+            final settlement.
           </p>
         </div>
       )}
 
-      {/* Input + submit */}
       {step !== "confirming" && (
         <div style={{ padding: "16px 20px" }}>
-          <label
-            style={{
-              display: "block",
-              fontSize: 11,
-              color: "var(--text-muted)",
-              fontFamily: "var(--font-mono)",
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              marginBottom: 8,
-            }}
-          >
-            Transaction hash
-          </label>
-          <input
-            type="text"
-            placeholder="0x..."
-            value={txHash}
-            onChange={(e) => {
-              setTxHash(e.target.value);
-              setErrorMsg("");
-              if (step === "error") setStep("idle");
-            }}
-            disabled={isLoading}
-            style={{
-              width: "100%",
-              fontFamily: "var(--font-mono)",
-              fontSize: 12,
-              background: "#0a0a0a",
-              border: `1px solid ${errorMsg ? "var(--error)" : "var(--border)"}`,
-              color: "var(--text-primary)",
-              borderRadius: 4,
-              padding: "9px 12px",
-              marginBottom: errorMsg ? 6 : 12,
-              outline: "none",
-              opacity: isLoading ? 0.6 : 1,
-            }}
-          />
+          {txHash && (
+            <div style={{ marginBottom: 12 }}>
+              <p
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11,
+                  color: "var(--text-muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  marginBottom: 6,
+                }}
+              >
+                Transaction hash
+              </p>
+              <p
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11,
+                  color: "var(--text-secondary)",
+                  overflowWrap: "anywhere",
+                  lineHeight: 1.5,
+                }}
+              >
+                {txHash}
+              </p>
+            </div>
+          )}
 
           {errorMsg && (
             <p
@@ -240,7 +254,7 @@ export function PaymentIntentBox({ intent, walletAddress, onUnlocked }: Props) {
           )}
 
           <button
-            onClick={handleSubmit}
+            onClick={handleUnlock}
             disabled={isLoading}
             style={{
               width: "100%",
@@ -256,29 +270,48 @@ export function PaymentIntentBox({ intent, walletAddress, onUnlocked }: Props) {
               fontFamily: "var(--font-mono)",
               letterSpacing: "0.02em",
             }}
-            onMouseOver={(e) => {
-              if (!isLoading) {
-                e.currentTarget.style.background = "var(--accent-hover)";
-                e.currentTarget.style.transform = "scale(0.99)";
-              }
-            }}
-            onMouseOut={(e) => {
-              if (!isLoading) {
-                e.currentTarget.style.background = "var(--accent)";
-                e.currentTarget.style.transform = "scale(1)";
-              }
-            }}
           >
-            {step === "submitting"
-              ? "Submitting..."
+            {step === "paying"
+              ? "Executing USDC payment..."
               : step === "verifying"
                 ? "Verifying settlement..."
-                : "Verify and unlock"}
+                : "Pay and unlock"}
           </button>
         </div>
       )}
     </div>
   );
+}
+
+async function executeUsdcPayment(params: {
+  bundlerClient: ModularWalletSession["bundlerClient"];
+  recipientWallet: Address;
+  amountUSDC: number;
+}) {
+  const userOpHash = await params.bundlerClient.sendUserOperation({
+    calls: [
+      {
+        to: ArcTestnet.usdcAddress as Address,
+        data: encodeFunctionData({
+          abi: erc20Abi,
+          functionName: "transfer",
+          args: [params.recipientWallet, parseUnits(params.amountUSDC.toString(), 6)],
+        }),
+        value: BigInt(0),
+      },
+    ],
+  });
+
+  const receipt = await params.bundlerClient.waitForUserOperationReceipt({
+    hash: userOpHash,
+    timeout: 120_000,
+  });
+
+  if (!receipt.success) {
+    throw new Error(receipt.reason ?? "USDC payment user operation reverted.");
+  }
+
+  return receipt.receipt.transactionHash;
 }
 
 function ReceiptLine({

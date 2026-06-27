@@ -69,12 +69,12 @@ export function Navbar() {
             Wallet
           </Link>
           <a
-            href="https://github.com"
+            href="https://faucet.circle.com/"
             target="_blank"
             rel="noreferrer"
             style={navLinkStyle}
           >
-            GitHub
+            Get Test USDC
           </a>
         </div>
 

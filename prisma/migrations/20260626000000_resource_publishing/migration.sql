@@ -1,0 +1,3 @@
+-- Placeholder migration directory was created before the resource publishing
+-- migration was finalized. The schema changes are applied in
+-- 20260626093000_resource_publishing.

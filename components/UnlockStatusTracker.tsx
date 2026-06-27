@@ -1,10 +1,16 @@
 type Props = {
   accessToken: string;
   resourceId: string;
+  txHash: string;
   expiresAt?: string;
 };
 
-export function UnlockStatusTracker({ accessToken, resourceId, expiresAt }: Props) {
+export function UnlockStatusTracker({
+  accessToken,
+  resourceId,
+  txHash,
+  expiresAt,
+}: Props) {
   const expiry = expiresAt ? new Date(expiresAt).toLocaleString() : null;
 
   return (
@@ -46,12 +52,62 @@ export function UnlockStatusTracker({ accessToken, resourceId, expiresAt }: Prop
             letterSpacing: "0.08em",
           }}
         >
-          Access unlocked
+          Unlocked Successfully
         </span>
       </div>
 
       {/* Token info */}
       <div style={{ padding: "20px" }}>
+        <div style={{ marginBottom: 16 }}>
+          <p
+            style={{
+              fontSize: 11,
+              color: "var(--text-muted)",
+              fontFamily: "var(--font-mono)",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              marginBottom: 6,
+            }}
+          >
+            Verified on Arc
+          </p>
+          <p
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 12,
+              color: "var(--success)",
+            }}
+          >
+            Settlement verified
+          </p>
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <p
+            style={{
+              fontSize: 11,
+              color: "var(--text-muted)",
+              fontFamily: "var(--font-mono)",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              marginBottom: 6,
+            }}
+          >
+            Transaction Hash
+          </p>
+          <p
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 12,
+              color: "var(--text-secondary)",
+              wordBreak: "break-all",
+              lineHeight: 1.5,
+            }}
+          >
+            {txHash}
+          </p>
+        </div>
+
         <div style={{ marginBottom: 16 }}>
           <p
             style={{

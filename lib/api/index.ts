@@ -1,11 +1,16 @@
 import type {
   AccessIntentResponse,
+  DashboardResponse,
   LedgerResponse,
   PaymentInitiateRequest,
   PaymentInitiateResponse,
   PaymentVerifyResponse,
   ProtocolStatsResponse,
+  PurchaseListResponse,
   RecentActivityResponse,
+  CreateResourceRequest,
+  CreateResourceResponse,
+  ResourceDetailResponse,
   ResourceListResponse,
   UnlockRequest,
   UnlockResponse,
@@ -109,6 +114,11 @@ export async function getLedger(opts: {
   return apiFetch<LedgerResponse>(`/api/ledger?${params}`);
 }
 
+export async function getPurchases(wallet: string): Promise<PurchaseListResponse> {
+  const params = new URLSearchParams({ wallet });
+  return apiFetch<PurchaseListResponse>(`/api/purchases?${params}`);
+}
+
 export async function getResources(opts: {
   ownerWallet?: string;
   includeInactive?: boolean;
@@ -124,10 +134,49 @@ export async function getFeaturedResources(): Promise<ResourceListResponse> {
   return apiFetch<ResourceListResponse>("/api/resources/featured");
 }
 
+export async function getMarketplaceResources(): Promise<ResourceListResponse> {
+  return apiFetch<ResourceListResponse>("/api/resources");
+}
+
+export async function getResourceDetail(
+  resourceId: string,
+  wallet?: string | null,
+): Promise<ResourceDetailResponse> {
+  const params = new URLSearchParams();
+  if (wallet) params.set("wallet", wallet);
+  const query = params.toString();
+
+  return apiFetch<ResourceDetailResponse>(
+    `/api/resource/${resourceId}${query ? `?${query}` : ""}`,
+    wallet
+      ? {
+          headers: {
+            "Content-Type": "application/json",
+            "x-wallet-address": wallet,
+          },
+        }
+      : undefined,
+  );
+}
+
+export async function postResource(
+  body: CreateResourceRequest,
+): Promise<CreateResourceResponse> {
+  return apiFetch<CreateResourceResponse>("/api/resource/create", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 export async function getProtocolStats(): Promise<ProtocolStatsResponse> {
   return apiFetch<ProtocolStatsResponse>("/api/protocol/stats");
 }
 
 export async function getRecentActivity(): Promise<RecentActivityResponse> {
   return apiFetch<RecentActivityResponse>("/api/activity/recent");
+}
+
+export async function getDashboard(wallet: string): Promise<DashboardResponse> {
+  const params = new URLSearchParams({ wallet });
+  return apiFetch<DashboardResponse>(`/api/dashboard?${params}`);
 }

@@ -3,13 +3,16 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Navbar } from "@/components/Navbar";
+import { WalletCopyButton } from "@/components/WalletCopyButton";
 import {
   getFeaturedResources,
   getProtocolStats,
   getRecentActivity,
 } from "@/lib/api";
 import { formatUSDC, shortAddress } from "@/lib/ui";
+import { useWallet } from "@/lib/ui/WalletContext";
 import type {
+  ActivityEventType,
   ProtocolStats,
   RecentActivityEntry,
   ResourceMeta,
@@ -56,11 +59,14 @@ const resourceFallbacks: Array<{
 ];
 
 export default function LandingPage() {
+  const { address, connected } = useWallet();
   const [stats, setStats] = useState<ProtocolStats>(EMPTY_STATS);
   const [resources, setResources] = useState<ResourceMeta[]>([]);
   const [activity, setActivity] = useState<RecentActivityEntry[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     Promise.all([
       getProtocolStats(),
       getFeaturedResources(),
@@ -75,6 +81,9 @@ export default function LandingPage() {
         setStats(EMPTY_STATS);
         setResources([]);
         setActivity([]);
+      })
+      .finally(() => {
+        setLoading(false);
       });
   }, []);
 
@@ -178,9 +187,38 @@ export default function LandingPage() {
               Own your reputation on-chain.
             </p>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <Link href="/wallet" style={primaryButtonStyle}>
-                Connect Wallet
-              </Link>
+              {connected && address ? (
+                <div
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    background: "var(--accent)",
+                    border: "1px solid var(--accent)",
+                    borderRadius: 4,
+                    overflow: "visible",
+                  }}
+                >
+                  <Link href="/dashboard" style={connectedWalletButtonStyle}>
+                    {shortAddress(address)}
+                  </Link>
+                  <WalletCopyButton
+                    address={address}
+                    buttonStyle={{
+                      width: 38,
+                      height: 38,
+                      background: "rgba(0,0,0,0.12)",
+                      color: "#000",
+                      border: "0",
+                      borderLeft: "1px solid rgba(0,0,0,0.18)",
+                      borderRadius: 0,
+                    }}
+                  />
+                </div>
+              ) : (
+                <Link href="/wallet" style={primaryButtonStyle}>
+                  Connect Wallet
+                </Link>
+              )}
               <Link href="/explore" style={secondaryButtonStyle}>
                 Explore Resources
               </Link>
@@ -194,13 +232,22 @@ export default function LandingPage() {
             title="A public access layer for premium work"
           />
           <div style={statsGridStyle}>
-            <StatCard label="Total Resources" value={stats.totalResources} />
-            <StatCard label="Total Unlocks" value={stats.totalUnlocks} />
+            <StatCard
+              label="Total Resources"
+              value={loading ? "Loading..." : stats.totalResources}
+            />
+            <StatCard
+              label="Total Unlocks"
+              value={loading ? "Loading..." : stats.totalUnlocks}
+            />
             <StatCard
               label="Total USDC Volume"
-              value={formatUSDC(stats.totalUSDCVolume)}
+              value={loading ? "Loading..." : formatUSDC(stats.totalUSDCVolume)}
             />
-            <StatCard label="Total Creators" value={stats.totalCreators} />
+            <StatCard
+              label="Total Creators"
+              value={loading ? "Loading..." : stats.totalCreators}
+            />
           </div>
         </section>
 
@@ -230,7 +277,18 @@ export default function LandingPage() {
               overflow: "hidden",
             }}
           >
-            {activity.length > 0 ? (
+            {loading ? (
+              <p
+                style={{
+                  padding: 20,
+                  fontSize: 13,
+                  color: "var(--text-muted)",
+                  lineHeight: 1.6,
+                }}
+              >
+                Loading activity...
+              </p>
+            ) : activity.length > 0 ? (
               activity.map((entry) => (
                 <ActivityRow key={entry.id} entry={entry} />
               ))
@@ -467,36 +525,71 @@ function ResourcePreviewCard({
 }
 
 function ActivityRow({ entry }: { entry: RecentActivityEntry }) {
+  const activityMeta = activityMetaMap[entry.type];
+
   return (
     <div
       style={{
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
+        display: "grid",
+        gridTemplateColumns: "1fr auto",
         gap: 16,
         padding: "14px 18px",
         borderBottom: "1px solid var(--border-subtle)",
       }}
     >
-      <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5 }}>
-        <span style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
-          {shortAddress(entry.payerWallet)}
-        </span>{" "}
-        unlocked "{entry.resourceName}"
-      </p>
-      <span
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          color: "var(--text-muted)",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {new Date(entry.createdAt).toLocaleDateString()}
-      </span>
+      <div style={{ minWidth: 0 }}>
+        <p
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            color: "var(--accent)",
+            marginBottom: 6,
+            textTransform: "uppercase",
+            letterSpacing: "0.08em",
+          }}
+        >
+          {activityMeta.label}
+        </p>
+        <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+          <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+            {shortAddress(entry.wallet)}
+          </span>{" "}
+          {activityMeta.verb} "{entry.resourceTitle || entry.resourceName}"
+        </p>
+      </div>
+      <div style={{ textAlign: "right" }}>
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            color: "var(--text-muted)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {new Date(entry.createdAt).toLocaleDateString()}
+        </span>
+      </div>
     </div>
   );
 }
+
+const activityMetaMap: Record<
+  ActivityEventType,
+  { label: string; verb: string }
+> = {
+  RESOURCE_PUBLISHED: {
+    label: "Resource Published",
+    verb: "published",
+  },
+  RESOURCE_UNLOCKED: {
+    label: "Resource Unlocked",
+    verb: "unlocked",
+  },
+  PROTECTED_RESOURCE_ACCESSED: {
+    label: "Protected Resource Accessed",
+    verb: "accessed",
+  },
+};
 
 function TransparencyCard({
   image,
@@ -572,6 +665,16 @@ const primaryButtonStyle = {
   textDecoration: "none",
   fontSize: 13,
   fontWeight: 600,
+} satisfies React.CSSProperties;
+
+const connectedWalletButtonStyle = {
+  color: "#000",
+  padding: "11px 14px 11px 16px",
+  textDecoration: "none",
+  fontFamily: "var(--font-mono)",
+  fontSize: 13,
+  fontWeight: 600,
+  whiteSpace: "nowrap",
 } satisfies React.CSSProperties;
 
 const secondaryButtonStyle = {

@@ -1,463 +1,451 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Navbar } from "@/components/Navbar";
-import { LedgerTable } from "@/components/LedgerTable";
-import { WalletCopyButton } from "@/components/WalletCopyButton";
+import { getDashboard, getRecentActivity } from "@/lib/api";
+import { formatUSDC, shortAddress } from "@/lib/ui";
 import { useWallet } from "@/lib/ui/WalletContext";
-import { formatDate, formatUSDC, shortAddress } from "@/lib/ui";
-import { getLedger, getResources } from "@/lib/api";
-import type { LedgerEntry, ResourceMeta } from "@/types";
+import type {
+  ActivityEventType,
+  CreatorAnalytics,
+  DashboardResponse,
+  ProtocolStats,
+  RecentActivityEntry,
+} from "@/types";
 
-type DashboardState =
-  | { status: "idle" }
-  | { status: "loading" }
-  | {
-      status: "done";
-      ledger: LedgerEntry[];
-      createdResources: ResourceMeta[];
-    }
-  | { status: "error"; message: string };
+const EMPTY_STATS: ProtocolStats = {
+  totalResources: 0,
+  totalUnlocks: 0,
+  totalUSDCVolume: 0,
+  totalCreators: 0,
+};
+
+const EMPTY_ANALYTICS: CreatorAnalytics = {
+  revenueEarned: 0,
+  resourcesPublished: 0,
+  totalUnlocks: 0,
+  topResource: null,
+  x402: {
+    protectedRequests: 0,
+    successfulAccesses: 0,
+    failedAccesses: 0,
+    conversionRate: 0,
+  },
+};
 
 export default function DashboardPage() {
   const { address, connected } = useWallet();
-  const [state, setState] = useState<DashboardState>({ status: "idle" });
+  const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
+  const [activity, setActivity] = useState<RecentActivityEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!connected || !address) {
-      setState({ status: "idle" });
+      setDashboard(null);
+      setActivity([]);
+      setLoading(false);
+      setError(null);
       return;
     }
 
-    setState({ status: "loading" });
+    let cancelled = false;
 
-    Promise.all([
-      getLedger({ wallet: address, limit: 200 }),
-      getResources({ ownerWallet: address }),
-    ])
-      .then(([ledgerRes, resourceRes]) => {
-        setState({
-          status: "done",
-          ledger: ledgerRes.ledger,
-          createdResources: resourceRes.resources,
-        });
+    setLoading(true);
+    setError(null);
+
+    Promise.all([getDashboard(address), getRecentActivity()])
+      .then(([dashboardRes, activityRes]) => {
+        if (cancelled) {
+          return;
+        }
+
+        setDashboard(dashboardRes);
+        setActivity(activityRes.activity);
       })
-      .catch((error: Error) => {
-        setState({ status: "error", message: error.message });
+      .catch((fetchError: unknown) => {
+        if (cancelled) {
+          return;
+        }
+
+        setDashboard(null);
+        setActivity([]);
+        setError(
+          fetchError instanceof Error
+            ? fetchError.message
+            : "Dashboard data could not be loaded.",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [address, connected]);
 
-  const purchasedResources = useMemo(() => {
-    if (state.status !== "done") return [];
-
-    const unlocked = state.ledger.filter((entry) =>
-      ["UNLOCKED", "ACCESS_GRANTED", "PAYMENT_CONFIRMED"].includes(entry.status),
-    );
-
-    return Array.from(
-      new Map(unlocked.map((entry) => [entry.resourceId, entry])).values(),
-    );
-  }, [state]);
-
-  const paymentHistory =
-    state.status === "done"
-      ? state.ledger.filter((entry) => entry.status.startsWith("PAYMENT_"))
-      : [];
+  const stats = dashboard?.stats ?? EMPTY_STATS;
+  const analytics = dashboard?.analytics ?? EMPTY_ANALYTICS;
+  const conversionRate = useMemo(
+    () => `${(analytics.x402.conversionRate * 100).toFixed(1)}%`,
+    [analytics.x402.conversionRate],
+  );
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
       <Navbar />
 
-      <main
-        style={{
-          maxWidth: 1100,
-          margin: "0 auto",
-          padding: "40px 24px 80px",
-        }}
-      >
-        <header style={{ marginBottom: 32 }}>
-          <p
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 11,
-              color: "var(--text-muted)",
-              textTransform: "uppercase",
-              letterSpacing: "0.1em",
-              marginBottom: 8,
-            }}
-          >
-            Dashboard
-          </p>
-          <h1
-            style={{
-              fontSize: 24,
-              fontWeight: 600,
-              color: "var(--text-primary)",
-              marginBottom: 10,
-            }}
-          >
-            Wallet identity
+      <main style={{ maxWidth: 1200, margin: "0 auto", padding: "44px 24px 80px" }}>
+        <header style={{ marginBottom: 28 }}>
+          <p style={eyebrowStyle}>Dashboard</p>
+          <h1 style={{ fontSize: 30, color: "var(--text-primary)", marginBottom: 10 }}>
+            Protocol analytics
           </h1>
-          {connected && address ? (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                flexWrap: "wrap",
-              }}
-            >
-              <div
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 8,
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 12,
-                  color: "var(--text-secondary)",
-                  background: "var(--surface)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 4,
-                  padding: "7px 10px",
-                }}
-              >
-                <span
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: "50%",
-                    background: "var(--accent)",
-                  }}
-                />
-                Connected {shortAddress(address)}
-              </div>
-              <WalletCopyButton address={address} />
-            </div>
-          ) : (
-            <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
-              Connect with a passkey to view wallet activity.
-            </p>
-          )}
+          <p style={{ fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.7 }}>
+            Live protocol metrics and creator performance from stored AccessMesh data.
+          </p>
         </header>
 
-        {connected && address && (
-          <nav
-            aria-label="Dashboard navigation"
-            style={{
-              display: "flex",
-              gap: 10,
-              flexWrap: "wrap",
-              marginBottom: 28,
-            }}
-          >
-            <DashboardNavLink href="/dashboard">Dashboard</DashboardNavLink>
-            <DashboardNavLink href="/explore">Explore Resources</DashboardNavLink>
-            <DashboardNavLink href="/resources/create">Create Resource</DashboardNavLink>
-            <DashboardNavLink href="/wallet">Wallet</DashboardNavLink>
-          </nav>
-        )}
-
-        {!connected && (
-          <EmptyPanel
-            title="No wallet connected"
-            body="Return to the entry screen and continue with your passkey."
-            actionHref="/"
-            actionLabel="Connect wallet"
-          />
-        )}
-
-        {connected && state.status === "loading" && (
-          <Panel>
-            <p
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 12,
-                color: "var(--text-muted)",
-              }}
-            >
-              Loading wallet activity...
+        {!connected || !address ? (
+          <section style={emptyStateStyle}>
+            <p style={{ color: "var(--text-secondary)", lineHeight: 1.6 }}>
+              Connect a wallet to view creator analytics and protocol performance.
             </p>
-          </Panel>
-        )}
-
-        {connected && state.status === "error" && (
-          <Panel>
-            <p style={{ fontSize: 13, color: "var(--error)" }}>
-              {state.message}
-            </p>
-          </Panel>
-        )}
-
-        {connected && state.status === "done" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
-            <section>
+            <Link href="/wallet?next=/dashboard" style={primaryButtonStyle}>
+              Connect Wallet
+            </Link>
+          </section>
+        ) : loading ? (
+          <section style={emptyStateStyle}>
+            <p style={{ color: "var(--text-secondary)" }}>Loading dashboard data...</p>
+          </section>
+        ) : error ? (
+          <section style={emptyStateStyle}>
+            <p style={{ color: "var(--text-secondary)", lineHeight: 1.6 }}>{error}</p>
+          </section>
+        ) : (
+          <>
+            <section style={sectionStyle}>
               <SectionHeader
-                title="Purchased resources"
-                detail={`${purchasedResources.length} resources`}
+                eyebrow="Protocol stats"
+                title="Protocol-wide activity"
               />
-              {purchasedResources.length > 0 ? (
-                <ResourceIdList entries={purchasedResources} />
-              ) : (
-                <EmptyPanel
-                  title="No purchases yet"
-                  body="Unlocked resources will appear here after settlement verification."
+              <div style={statsGridStyle}>
+                <StatCard label="Total Resources" value={stats.totalResources} />
+                <StatCard label="Total Unlocks" value={stats.totalUnlocks} />
+                <StatCard
+                  label="Total USDC Volume"
+                  value={formatUSDC(stats.totalUSDCVolume)}
                 />
-              )}
+                <StatCard label="Total Creators" value={stats.totalCreators} />
+              </div>
             </section>
 
-            <section>
+            <section style={sectionStyle}>
               <SectionHeader
-                title="Created resources"
-                detail={`${state.createdResources.length} resources`}
+                eyebrow="Creator analytics"
+                title="Performance for the connected wallet"
               />
-              {state.createdResources.length > 0 ? (
-                <CreatedResourceList resources={state.createdResources} />
-              ) : (
-                <EmptyPanel
-                  title="No created resources"
-                  body="Resources created by this wallet will appear here."
+              <div style={creatorGridStyle}>
+                <StatCard
+                  label="Revenue Earned"
+                  value={formatUSDC(analytics.revenueEarned)}
                 />
-              )}
+                <StatCard
+                  label="Resources Published"
+                  value={analytics.resourcesPublished}
+                />
+                <StatCard label="Total Unlocks" value={analytics.totalUnlocks} />
+                <div style={topResourceStyle}>
+                  <p style={metricLabelStyle}>Top Performing Resource</p>
+                  {analytics.topResource ? (
+                    <>
+                      <h2 style={topResourceTitleStyle}>
+                        {analytics.topResource.title}
+                      </h2>
+                      <div style={topResourceMetaGridStyle}>
+                        <div>
+                          <p style={metaLabelStyle}>Revenue</p>
+                          <p style={metaValueStyle}>
+                            {formatUSDC(analytics.topResource.revenue)}
+                          </p>
+                        </div>
+                        <div>
+                          <p style={metaLabelStyle}>Unlocks</p>
+                          <p style={metaValueStyle}>{analytics.topResource.unlockCount}</p>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <p style={{ color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                      No published resources yet.
+                    </p>
+                  )}
+                </div>
+              </div>
             </section>
 
-            <section>
-              <SectionHeader
-                title="Payment history"
-                detail={`${paymentHistory.length} payment events`}
-              />
-              <LedgerTable entries={paymentHistory} />
+            <section style={sectionStyle}>
+              <SectionHeader eyebrow="x402 analytics" title="Protected access conversion" />
+              <div style={statsGridStyle}>
+                <StatCard
+                  label="Protected Requests"
+                  value={analytics.x402.protectedRequests}
+                />
+                <StatCard
+                  label="Successful Accesses"
+                  value={analytics.x402.successfulAccesses}
+                />
+                <StatCard
+                  label="Failed Accesses"
+                  value={analytics.x402.failedAccesses}
+                />
+                <StatCard label="Conversion Rate" value={conversionRate} />
+              </div>
             </section>
 
-            <section>
-              <SectionHeader
-                title="Full ledger"
-                detail={`${state.ledger.length} total events`}
-              />
-              <LedgerTable entries={state.ledger} />
+            <section style={sectionStyle}>
+              <SectionHeader eyebrow="Activity feed" title="Newest events first" />
+              <div style={feedStyle}>
+                {activity.length > 0 ? (
+                  activity.map((entry) => <ActivityRow key={entry.id} entry={entry} />)
+                ) : (
+                  <p style={emptyFeedTextStyle}>No activity recorded yet.</p>
+                )}
+              </div>
             </section>
-          </div>
+          </>
         )}
       </main>
     </div>
   );
 }
 
-function DashboardNavLink({
-  href,
-  children,
-}: {
-  href: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Link
-      href={href}
-      style={{
-        fontSize: 12,
-        color: "var(--text-secondary)",
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
-        borderRadius: 4,
-        padding: "7px 10px",
-        textDecoration: "none",
-      }}
-    >
-      {children}
-    </Link>
-  );
-}
-
 function SectionHeader({
+  eyebrow,
   title,
-  detail,
 }: {
+  eyebrow: string;
   title: string;
-  detail: string;
 }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "baseline",
-        justifyContent: "space-between",
-        gap: 12,
-        marginBottom: 12,
-      }}
-    >
-      <h2
-        style={{
-          fontSize: 15,
-          fontWeight: 600,
-          color: "var(--text-primary)",
-        }}
-      >
+    <div style={{ marginBottom: 18 }}>
+      <p style={eyebrowStyle}>{eyebrow}</p>
+      <h2 style={{ fontSize: 22, lineHeight: 1.3, color: "var(--text-primary)" }}>
         {title}
       </h2>
-      <span
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          color: "var(--text-muted)",
-        }}
-      >
-        {detail}
-      </span>
     </div>
   );
 }
 
-function Panel({ children }: { children: React.ReactNode }) {
+function StatCard({ label, value }: { label: string; value: number | string }) {
   return (
-    <div
-      style={{
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
-        borderRadius: 8,
-        padding: "24px",
-      }}
-    >
-      {children}
+    <div style={statCardStyle}>
+      <p style={metricLabelStyle}>{label}</p>
+      <p style={metricValueStyle}>{value}</p>
     </div>
   );
 }
 
-function EmptyPanel({
-  title,
-  body,
-  actionHref,
-  actionLabel,
-}: {
-  title: string;
-  body: string;
-  actionHref?: string;
-  actionLabel?: string;
-}) {
+function ActivityRow({ entry }: { entry: RecentActivityEntry }) {
+  const activityMeta = activityMetaMap[entry.type];
+
   return (
-    <Panel>
-      <p
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 12,
-          color: "var(--text-secondary)",
-          marginBottom: 6,
-        }}
-      >
-        {title}
-      </p>
-      <p style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6 }}>
-        {body}
-      </p>
-      {actionHref && actionLabel && (
-        <Link
-          href={actionHref}
-          style={{
-            display: "inline-block",
-            marginTop: 14,
-            fontSize: 12,
-            color: "#000",
-            background: "var(--accent)",
-            borderRadius: 4,
-            padding: "7px 12px",
-            textDecoration: "none",
-            fontWeight: 600,
-          }}
-        >
-          {actionLabel}
-        </Link>
-      )}
-    </Panel>
+    <div style={activityRowStyle}>
+      <div style={{ minWidth: 0 }}>
+        <p style={activityTypeStyle}>{activityMeta.label}</p>
+        <p style={activityTextStyle}>
+          <span style={walletStyle}>{shortAddress(entry.wallet)}</span>{" "}
+          {activityMeta.verb} "{entry.resourceTitle || entry.resourceName}"
+        </p>
+      </div>
+      <span style={timestampStyle}>{new Date(entry.createdAt).toLocaleDateString()}</span>
+    </div>
   );
 }
 
-function ResourceIdList({ entries }: { entries: LedgerEntry[] }) {
-  return (
-    <Panel>
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {entries.map((entry) => (
-          <div
-            key={entry.resourceId}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 16,
-            }}
-          >
-            <Link
-              href={`/access/${entry.resourceId}`}
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 12,
-                color: "var(--text-secondary)",
-                textDecoration: "none",
-              }}
-            >
-              {entry.resourceId}
-            </Link>
-            <span
-              style={{
-                fontSize: 12,
-                color: "var(--text-muted)",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {formatDate(entry.createdAt)}
-            </span>
-          </div>
-        ))}
-      </div>
-    </Panel>
-  );
-}
+const activityMetaMap: Record<
+  ActivityEventType,
+  { label: string; verb: string }
+> = {
+  RESOURCE_PUBLISHED: {
+    label: "Resource Published",
+    verb: "published",
+  },
+  RESOURCE_UNLOCKED: {
+    label: "Resource Unlocked",
+    verb: "unlocked",
+  },
+  PROTECTED_RESOURCE_ACCESSED: {
+    label: "Protected Resource Accessed",
+    verb: "accessed",
+  },
+};
 
-function CreatedResourceList({ resources }: { resources: ResourceMeta[] }) {
-  return (
-    <Panel>
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {resources.map((resource) => (
-          <div
-            key={resource.id}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr auto",
-              gap: 12,
-              alignItems: "center",
-            }}
-          >
-            <div>
-              <p
-                style={{
-                  fontSize: 13,
-                  color: "var(--text-primary)",
-                  fontWeight: 600,
-                  marginBottom: 4,
-                }}
-              >
-                {resource.name}
-              </p>
-              <p
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 11,
-                  color: "var(--text-muted)",
-                }}
-              >
-                {resource.type} / {shortAddress(resource.id)}
-              </p>
-            </div>
-            <span
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 12,
-                color: "var(--accent)",
-              }}
-            >
-              {formatUSDC(resource.priceUSDC ?? 0)}
-            </span>
-          </div>
-        ))}
-      </div>
-    </Panel>
-  );
-}
+const sectionStyle = {
+  marginBottom: 28,
+} satisfies CSSProperties;
+
+const eyebrowStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 11,
+  color: "var(--accent)",
+  textTransform: "uppercase",
+  letterSpacing: "0.1em",
+  marginBottom: 10,
+} satisfies CSSProperties;
+
+const statsGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+  gap: 14,
+} satisfies CSSProperties;
+
+const creatorGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+  gap: 14,
+  alignItems: "stretch",
+} satisfies CSSProperties;
+
+const statCardStyle = {
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+  padding: 18,
+  minWidth: 0,
+} satisfies CSSProperties;
+
+const metricLabelStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 11,
+  color: "var(--text-muted)",
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  marginBottom: 12,
+} satisfies CSSProperties;
+
+const metricValueStyle = {
+  fontSize: 26,
+  lineHeight: 1.15,
+  fontWeight: 600,
+  color: "var(--text-primary)",
+  wordBreak: "break-word",
+} satisfies CSSProperties;
+
+const topResourceStyle = {
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+  padding: 18,
+  minWidth: 0,
+} satisfies CSSProperties;
+
+const topResourceTitleStyle = {
+  fontSize: 18,
+  lineHeight: 1.35,
+  fontWeight: 600,
+  color: "var(--text-primary)",
+  marginBottom: 16,
+  wordBreak: "break-word",
+} satisfies CSSProperties;
+
+const topResourceMetaGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+  gap: 12,
+} satisfies CSSProperties;
+
+const metaLabelStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 10,
+  color: "var(--text-muted)",
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  marginBottom: 6,
+} satisfies CSSProperties;
+
+const metaValueStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 14,
+  color: "var(--text-secondary)",
+  wordBreak: "break-word",
+} satisfies CSSProperties;
+
+const feedStyle = {
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+  overflow: "hidden",
+} satisfies CSSProperties;
+
+const activityRowStyle = {
+  display: "grid",
+  gridTemplateColumns: "1fr auto",
+  gap: 16,
+  padding: "14px 18px",
+  borderBottom: "1px solid var(--border-subtle)",
+} satisfies CSSProperties;
+
+const activityTypeStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 11,
+  color: "var(--accent)",
+  marginBottom: 6,
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+} satisfies CSSProperties;
+
+const activityTextStyle = {
+  fontSize: 13,
+  color: "var(--text-secondary)",
+  lineHeight: 1.5,
+  wordBreak: "break-word",
+} satisfies CSSProperties;
+
+const walletStyle = {
+  fontFamily: "var(--font-mono)",
+  color: "var(--text-primary)",
+} satisfies CSSProperties;
+
+const timestampStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 11,
+  color: "var(--text-muted)",
+  whiteSpace: "nowrap",
+} satisfies CSSProperties;
+
+const emptyStateStyle = {
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 16,
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+  padding: 24,
+} satisfies CSSProperties;
+
+const emptyFeedTextStyle = {
+  padding: 20,
+  color: "var(--text-muted)",
+  lineHeight: 1.6,
+} satisfies CSSProperties;
+
+const primaryButtonStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "var(--accent)",
+  color: "#000",
+  border: "1px solid var(--accent)",
+  borderRadius: 4,
+  padding: "11px 16px",
+  textDecoration: "none",
+  fontSize: 13,
+  fontWeight: 600,
+  width: "fit-content",
+} satisfies CSSProperties;
