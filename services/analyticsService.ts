@@ -5,6 +5,7 @@ import {
   listRecentActivity,
   listRecentActivityByType,
 } from "@/services/activityService";
+import { serializeResource } from "@/services/resourceService";
 import { getX402Analytics } from "@/services/x402AccessService";
 import type {
   CreatedResourceSummary,
@@ -12,7 +13,6 @@ import type {
   CreatorProfile,
   ProtocolStats,
   RecentActivityEntry,
-  ResourceType,
 } from "@/types";
 
 const CREATOR_REVENUE_SHARE = 0.95;
@@ -215,22 +215,8 @@ export async function getCreatorProfile(wallet: string): Promise<CreatorProfile>
         : fallbackSettlement?.wallets.size ?? resource.unlockCount;
 
     return {
-      id: resource.id,
-      creatorWallet: resource.creatorWallet,
-      creatorDisplayName: resource.creatorDisplayName,
-      title: resource.title || resource.name,
-      name: resource.name,
-      description: resource.description,
-      category: normalizeResourceType(resource.category) as ResourceType,
-      type: normalizeResourceType(resource.type) as ResourceType,
-      priceUSDC: resource.priceUSDC,
-      resourceUrl: resource.resourceUrl || resource.endpoint,
-      endpoint: resource.endpoint,
-      coverImage: resource.coverImage,
-      tags: parseStoredTags(resource.tags),
+      ...serializeResource(resource),
       unlockCount,
-      isActive: resource.isActive,
-      createdAt: resource.createdAt.toISOString(),
       revenue,
     };
   });
@@ -271,21 +257,7 @@ export async function getCreatedResourceSummaries(
   });
 
   return resources.map((resource) => ({
-    id: resource.id,
-    creatorWallet: resource.creatorWallet,
-    title: resource.title || resource.name,
-    name: resource.name,
-    description: resource.description,
-    category: normalizeResourceType(resource.category),
-    type: normalizeResourceType(resource.type),
-    priceUSDC: resource.priceUSDC,
-    resourceUrl: resource.resourceUrl || resource.endpoint,
-    endpoint: resource.endpoint,
-    coverImage: resource.coverImage,
-    tags: parseStoredTags(resource.tags),
-    unlockCount: resource.unlockCount,
-    isActive: resource.isActive,
-    createdAt: resource.createdAt.toISOString(),
+    ...serializeResource(resource),
     revenue: resource.purchases.reduce(
       (sum, purchase) => sum + purchase.amountUSDC,
       0,
@@ -304,19 +276,6 @@ function normalizeResourceType(value: string) {
   }
 
   return "CONTENT";
-}
-
-function parseStoredTags(value: string) {
-  try {
-    const parsed = JSON.parse(value);
-    if (Array.isArray(parsed)) {
-      return parsed.filter((tag): tag is string => typeof tag === "string");
-    }
-  } catch {
-    return [];
-  }
-
-  return [];
 }
 
 function resolveCreatorDisplayName(

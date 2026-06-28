@@ -18,9 +18,14 @@ import {
 } from "@/services/ledgerService";
 import {
   getResourcePaymentParticipants,
+  serializeResource,
 } from "@/services/resourceService";
+import type { PaymentRequirement } from "@/types";
 
-export async function initiatePayment(resourceId: string, wallet: string) {
+export async function initiatePayment(
+  resourceId: string,
+  wallet: string,
+): Promise<PaymentRequirement> {
   const payerWallet = normalizeAddress(wallet, "wallet");
   const {
     resource,
@@ -54,13 +59,10 @@ export async function initiatePayment(resourceId: string, wallet: string) {
   });
 
   return {
-    resource: {
-      id: resource.id,
-      name: resource.name,
-      type: resource.type,
-      description: resource.description,
-      priceUSDC: resource.priceUSDC,
-    },
+    resourceId: resource.id,
+    amountUSDC: resource.priceUSDC,
+    recipientWallet: creatorWallet,
+    resource: serializeResource(resource),
     payerWallet,
     providerWallet: creatorWallet,
     creatorWallet,

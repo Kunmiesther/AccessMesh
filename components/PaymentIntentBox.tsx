@@ -67,8 +67,8 @@ export function PaymentIntentBox({
         },
       );
 
-      if (result.ok && result.resourceId) {
-        onUnlocked(intent.resource, result.txHash ?? hash);
+      if (result.ok) {
+        onUnlocked(result.resource, result.txHash);
         return;
       }
 

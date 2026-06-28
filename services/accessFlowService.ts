@@ -11,7 +11,11 @@ import {
 import { ActivityType } from "@/services/activityService";
 import { verifySettlement } from "@/services/arcVerifier";
 import { LedgerStatus, logAccessDenied, logEvent } from "@/services/ledgerService";
-import { getResourcePaymentParticipants } from "@/services/resourceService";
+import {
+  getResourcePaymentParticipants,
+  serializeResource,
+} from "@/services/resourceService";
+import type { PaymentIntent, UnlockResponse, UnlockVerification } from "@/types";
 
 const INTENT_TTL_MS =
   Number(process.env.ACCESS_INTENT_TTL_SECONDS ?? 600) * 1000;
@@ -49,7 +53,7 @@ export async function createAccessPaymentIntent(params: {
   payerWallet: string;
   fallbackRecipientWallet?: string | null;
   fallbackAmountUSDC?: string | number | null;
-}) {
+}): Promise<PaymentIntent> {
   const payerWallet = normalizeAddress(params.payerWallet, "wallet");
   const paymentFields = await resolvePaymentFields(params.resourceId);
   const createdAt = new Date();
@@ -91,12 +95,7 @@ export async function createAccessPaymentIntent(params: {
     treasuryAmountUSDC: paymentFields.treasuryAmountUSDC,
     expiresAt: intent.expiresAt,
     payerWallet,
-    resource: {
-      id: paymentFields.resource.id,
-      name: paymentFields.resource.name,
-      type: paymentFields.resource.type,
-      description: paymentFields.resource.description,
-    },
+    resource: serializeResource(paymentFields.resource),
     payment: buildCircleSendRequirement({
       amountUSDC: paymentFields.amountUSDC,
       providerWallet: paymentFields.recipientWallet,
@@ -108,7 +107,12 @@ export async function unlockAccess(params: {
   accessId: string;
   txHash: string;
   payerWallet?: string | null;
-}) {
+}): Promise<
+  UnlockResponse & {
+    accessToken?: string;
+    tokenType?: "Bearer";
+  }
+> {
   const accessId = requireString(params.accessId, "accessId");
   const txHash = normalizeTxHash(params.txHash);
   const intent = await resolveAccessIntent(accessId);
@@ -160,8 +164,10 @@ export async function unlockAccess(params: {
     };
   });
 
-  if (verification.status !== "SETTLED") {
-    const status = verification.status === "FAILED" ? "FAILED" : "CONFIRMING";
+  const unlockVerification = normalizeUnlockVerification(verification);
+
+  if (unlockVerification.status !== "SETTLED") {
+    const status = unlockVerification.status === "FAILED" ? "FAILED" : "CONFIRMING";
     await prisma.payment.update({
       where: { txHash },
       data: { status },
@@ -189,7 +195,7 @@ export async function unlockAccess(params: {
         status,
         txHash,
       },
-      verification,
+      verification: unlockVerification,
     };
   }
 
@@ -213,9 +219,10 @@ export async function unlockAccess(params: {
     tokenType: "Bearer",
     expiresAt: token.expiresAt,
     resourceId: intent.resourceId,
+    resource: settlement.resource,
     txHash,
     purchase: settlement.purchase,
-    verification,
+    verification: unlockVerification,
   };
 }
 
@@ -413,12 +420,14 @@ async function settlePayment(params: {
         },
       }));
 
-    if (!existingPurchase) {
-      await tx.resource.update({
+    const settledResource = existingPurchase
+      ? resource
+      : await tx.resource.update({
         where: { id: params.resourceId },
         data: { unlockCount: { increment: 1 } },
       });
 
+    if (!existingPurchase) {
       await tx.activityEvent.create({
         data: {
           type: ActivityType.ResourceUnlocked,
@@ -441,6 +450,7 @@ async function settlePayment(params: {
 
     return {
       payment: settledPayment,
+      resource: serializeResource(settledResource),
       purchase: {
         id: purchase.id,
         resourceId: purchase.resourceId,
@@ -546,6 +556,29 @@ function requireString(value: unknown, field: string) {
   }
 
   return value.trim();
+}
+
+function normalizeUnlockVerification(
+  verification: Awaited<ReturnType<typeof verifySettlement>>,
+): UnlockVerification {
+  const status =
+    verification.status === "PENDING" ? "CONFIRMING" : verification.status;
+
+  if (verification.status === "PENDING") {
+    return {
+      status,
+      settled: verification.settled,
+      reason: verification.reason,
+      txHash: verification.txHash,
+    };
+  }
+
+  return {
+    status,
+    settled: verification.settled,
+    reason: verification.reason,
+    txHash: verification.txHash,
+  };
 }
 
 function getErrorMessage(error: unknown) {

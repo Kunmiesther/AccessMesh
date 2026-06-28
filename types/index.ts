@@ -11,14 +11,14 @@ export type SortMode = "newest" | "price-asc" | "price-desc";
 export type ResourceMeta = {
   id: string;
   creatorWallet: string;
-  creatorDisplayName?: string | null;
+  creatorDisplayName: string | null;
   title: string;
   name: string;
   description: string;
   category: ResourceType;
   type: ResourceType;
-  resourceCategory?: string;
-  resourceType?: PublishedResourceType;
+  resourceCategory: string;
+  resourceType: PublishedResourceType | null;
   resourceContent?: string;
   priceUSDC: number;
   resourceUrl?: string;
@@ -71,25 +71,34 @@ export type UnlockRequest = {
   mockPayment?: boolean;
 };
 
-export type UnlockResponse = {
-  ok: boolean;
-  access: "UNLOCKED" | "LOCKED";
-  expiresAt?: string;
-  resourceId?: string;
-  txHash?: string;
-  purchase?: PurchaseProof;
-  payment?: {
-    id: string;
-    status: string;
-    txHash: string;
-  };
-  verification: {
-    status: "SETTLED" | "CONFIRMING" | "FAILED";
-    settled: boolean;
-    reason?: string;
-    txHash: string;
-  };
+export type UnlockVerification = {
+  status: "SETTLED" | "CONFIRMING" | "FAILED";
+  settled: boolean;
+  reason?: string;
+  txHash: string;
 };
+
+export type UnlockResponse =
+  | {
+      ok: true;
+      access: "UNLOCKED";
+      expiresAt: string;
+      resourceId: string;
+      resource: ResourceMeta;
+      txHash: string;
+      purchase: PurchaseProof;
+      verification: UnlockVerification;
+    }
+  | {
+      ok: false;
+      access: "UNLOCKED" | "LOCKED";
+      payment?: {
+        id: string;
+        status: string;
+        txHash: string;
+      };
+      verification: UnlockVerification;
+    };
 
 export type PaymentInitiateRequest = {
   resourceId: string;
@@ -100,6 +109,19 @@ export type PaymentRequirement = {
   resourceId: string;
   amountUSDC: number;
   recipientWallet: string;
+  resource: ResourceMeta;
+  payerWallet: string;
+  providerWallet: string;
+  creatorWallet: string;
+  treasuryWallet: string;
+  creatorAmountUSDC: number;
+  treasuryAmountUSDC: number;
+  amount: number;
+  currency: "USDC";
+  chain: string;
+  alreadySettled: boolean;
+  settledTxHash: string | null;
+  payment: unknown;
 };
 
 export type PaymentInitiateResponse = {

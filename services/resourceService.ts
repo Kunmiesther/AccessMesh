@@ -22,12 +22,7 @@ const PUBLISHED_RESOURCE_TYPES = [
   "EXTERNAL_LINK",
 ] as const;
 
-type ResourceRecord = Resource & {
-  creatorDisplayName: string | null;
-  resourceCategory: string;
-  resourceType: string;
-  resourceContent: string;
-};
+type ResourceRecord = Resource;
 
 type ListResourcesOptions = {
   ownerId?: string;
@@ -91,7 +86,7 @@ export async function createResource(input: CreateResourceRequest) {
     title: resource.title || resource.name,
   }).catch(() => undefined);
 
-  return toResourceMeta(resource as ResourceRecord);
+  return serializeResource(resource);
 }
 
 export async function listResources(options: ListResourcesOptions = {}) {
@@ -104,7 +99,7 @@ export async function listResources(options: ListResourcesOptions = {}) {
     take: options.limit,
   });
 
-  return resources.map((item) => toResourceMeta(item as ResourceRecord));
+  return resources.map((item) => serializeResource(item));
 }
 
 export async function getResource(id: string) {
@@ -112,7 +107,7 @@ export async function getResource(id: string) {
     where: { id },
   });
 
-  return resource ? toResourceMeta(resource as ResourceRecord) : null;
+  return resource ? serializeResource(resource) : null;
 }
 
 export async function getResourceDetail(id: string, wallet?: string | null) {
@@ -139,7 +134,7 @@ export async function getResourceDetail(id: string, wallet?: string | null) {
         })),
     );
 
-  return toResourceDetail(resource as ResourceRecord, owned);
+  return toResourceDetail(resource, owned);
 }
 
 export async function validateAccess(resourceId: string, wallet: string) {
@@ -152,7 +147,7 @@ export async function validateAccess(resourceId: string, wallet: string) {
     return {
       allowed: false,
       reason: "RESOURCE_NOT_FOUND_OR_INACTIVE",
-      resource: resource ? toResourceMeta(resource as ResourceRecord) : null,
+      resource: resource ? serializeResource(resource) : null,
       payment: null,
     };
   }
@@ -161,7 +156,7 @@ export async function validateAccess(resourceId: string, wallet: string) {
     return {
       allowed: true,
       reason: "CREATOR_WALLET_FOUND",
-      resource: toResourceMeta(resource as ResourceRecord),
+      resource: serializeResource(resource),
       payment: null,
     };
   }
@@ -178,7 +173,7 @@ export async function validateAccess(resourceId: string, wallet: string) {
   return {
     allowed: Boolean(payment),
     reason: payment ? "SETTLED_PAYMENT_FOUND" : "PAYMENT_REQUIRED",
-    resource: toResourceMeta(resource as ResourceRecord),
+    resource: serializeResource(resource),
     payment,
   };
 }
@@ -225,20 +220,20 @@ export async function getResourcePaymentParticipants(resourceId: string) {
   };
 }
 
-function toResourceMeta(resource: ResourceRecord): ResourceMeta {
+export function serializeResource(resource: ResourceRecord): ResourceMeta {
   const type = normalizeStoredResourceType(resource.type || resource.category);
   const resourceType = normalizeStoredPublishedResourceType(resource.resourceType);
 
   return {
     id: resource.id,
     creatorWallet: resource.creatorWallet,
-    creatorDisplayName: normalizeOptionalStoredText(resource.creatorDisplayName),
+    creatorDisplayName: normalizeOptionalStoredText(resource.creatorDisplayName) ?? null,
     title: resource.title || resource.name,
     name: resource.name,
     description: resource.description,
     category: normalizeStoredResourceType(resource.category),
     type,
-    resourceCategory: normalizeOptionalStoredText(resource.resourceCategory),
+    resourceCategory: normalizeOptionalStoredText(resource.resourceCategory) ?? "",
     resourceType,
     priceUSDC: resource.priceUSDC,
     coverImage: resource.coverImage,
@@ -250,7 +245,7 @@ function toResourceMeta(resource: ResourceRecord): ResourceMeta {
 }
 
 function toResourceDetail(resource: ResourceRecord, owned: boolean): ResourceDetail {
-  const meta = toResourceMeta(resource);
+  const meta = serializeResource(resource);
   const resourceUrl = normalizeOptionalStoredText(resource.resourceUrl || resource.endpoint);
   const resourceContent = normalizeOptionalStoredText(resource.resourceContent);
 
@@ -368,7 +363,7 @@ function normalizeStoredResourceType(value: string): ResourceType {
 function normalizeStoredPublishedResourceType(value: string) {
   return PUBLISHED_RESOURCE_TYPES.includes(value as PublishedResourceType)
     ? (value as PublishedResourceType)
-    : undefined;
+    : null;
 }
 
 function normalizeTags(value: CreateResourceRequest["tags"]) {
