@@ -54,8 +54,10 @@ export function PaymentIntentBox({
     try {
       const hash = await executeUsdcPayment({
         bundlerClient,
-        recipientWallet: intent.recipientWallet as Address,
-        amountUSDC: intent.amountUSDC,
+        creatorWallet: intent.creatorWallet as Address,
+        treasuryWallet: intent.treasuryWallet as Address,
+        creatorAmountUSDC: intent.creatorAmountUSDC,
+        treasuryAmountUSDC: intent.treasuryAmountUSDC,
       });
       setTxHash(hash);
 
@@ -158,7 +160,15 @@ export function PaymentIntentBox({
         <ReceiptLine label="SEND" value={`${intent.amountUSDC.toFixed(2)} USDC`} accent />
         <ReceiptLine
           label="TO"
-          value={`${intent.recipientWallet.slice(0, 10)}...${intent.recipientWallet.slice(-8)}`}
+          value={`${intent.creatorWallet.slice(0, 10)}...${intent.creatorWallet.slice(-8)}`}
+        />
+        <ReceiptLine
+          label="TREASURY"
+          value={`${intent.treasuryWallet.slice(0, 10)}...${intent.treasuryWallet.slice(-8)}`}
+        />
+        <ReceiptLine
+          label="SPLIT"
+          value={`${intent.creatorAmountUSDC.toFixed(2)} / ${intent.treasuryAmountUSDC.toFixed(2)} USDC`}
         />
         <ReceiptLine
           label="FROM"
@@ -180,7 +190,7 @@ export function PaymentIntentBox({
             <span style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
               {intent.amountUSDC.toFixed(2)} USDC
             </span>{" "}
-            to the creator on Arc, then verifies settlement and grants access automatically.
+            as a split payment on Arc, then verifies settlement and grants access automatically.
           </p>
         </div>
       )}
@@ -285,21 +295,13 @@ export function PaymentIntentBox({
 
 async function executeUsdcPayment(params: {
   bundlerClient: ModularWalletSession["bundlerClient"];
-  recipientWallet: Address;
-  amountUSDC: number;
+  creatorWallet: Address;
+  treasuryWallet: Address;
+  creatorAmountUSDC: number;
+  treasuryAmountUSDC: number;
 }) {
   const userOpHash = await params.bundlerClient.sendUserOperation({
-    calls: [
-      {
-        to: ArcTestnet.usdcAddress as Address,
-        data: encodeFunctionData({
-          abi: erc20Abi,
-          functionName: "transfer",
-          args: [params.recipientWallet, parseUnits(params.amountUSDC.toString(), 6)],
-        }),
-        value: BigInt(0),
-      },
-    ],
+    calls: buildTransferCalls(params),
   });
 
   const receipt = await params.bundlerClient.waitForUserOperationReceipt({
@@ -312,6 +314,35 @@ async function executeUsdcPayment(params: {
   }
 
   return receipt.receipt.transactionHash;
+}
+
+function buildTransferCalls(params: {
+  creatorWallet: Address;
+  treasuryWallet: Address;
+  creatorAmountUSDC: number;
+  treasuryAmountUSDC: number;
+}) {
+  const calls = [
+    buildTransferCall(params.creatorWallet, params.creatorAmountUSDC),
+  ];
+
+  if (params.treasuryAmountUSDC > 0) {
+    calls.push(buildTransferCall(params.treasuryWallet, params.treasuryAmountUSDC));
+  }
+
+  return calls;
+}
+
+function buildTransferCall(recipientWallet: Address, amountUSDC: number) {
+  return {
+    to: ArcTestnet.usdcAddress as Address,
+    data: encodeFunctionData({
+      abi: erc20Abi,
+      functionName: "transfer",
+      args: [recipientWallet, parseUnits(amountUSDC.toString(), 6)],
+    }),
+    value: BigInt(0),
+  };
 }
 
 function ReceiptLine({

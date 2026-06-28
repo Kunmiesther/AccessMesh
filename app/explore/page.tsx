@@ -7,7 +7,7 @@ import { getMarketplaceResources } from "@/lib/api";
 import { formatUSDC, shortAddress } from "@/lib/ui";
 import type { ResourceMeta, ResourceType, SortMode } from "@/types";
 
-const categories: Array<ResourceType | "ALL"> = [
+const defaultCategories: Array<ResourceType | "ALL"> = [
   "ALL",
   "CONTENT",
   "API",
@@ -19,30 +19,71 @@ export default function ExplorePage() {
   const [resources, setResources] = useState<ResourceMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [category, setCategory] = useState<ResourceType | "ALL">("ALL");
+  const [category, setCategory] = useState<string>("ALL");
   const [sortMode, setSortMode] = useState<SortMode>("newest");
 
   useEffect(() => {
+    let cancelled = false;
+
     getMarketplaceResources()
-      .then((res) => setResources(res.resources))
-      .catch(() => setResources([]))
-      .finally(() => setLoading(false));
+      .then((res) => {
+        if (!cancelled) {
+          setResources(res.resources);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setResources([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  const categoryOptions = useMemo(() => {
+    const discovered = Array.from(
+      new Set(
+        resources
+          .map((resource) => resource.resourceCategory ?? resource.category)
+          .filter((item): item is string => Boolean(item)),
+      ),
+    ).sort((a, b) => a.localeCompare(b));
+
+    const preferred = defaultCategories.filter((item) =>
+      item === "ALL" ? true : discovered.includes(item),
+    );
+
+    const extras = discovered.filter(
+      (item) => !defaultCategories.includes(item as ResourceType | "ALL"),
+    );
+
+    return [...preferred, ...extras];
+  }, [resources]);
 
   const visibleResources = useMemo(() => {
     const query = search.trim().toLowerCase();
+
     const filtered = resources.filter((resource) => {
-      const matchesCategory =
-        category === "ALL" || resource.category === category || resource.type === category;
+      const resourceCategory = resource.resourceCategory ?? resource.category;
+      const creatorLabel = resource.creatorDisplayName ?? resource.creatorWallet;
+      const matchesCategory = category === "ALL" || resourceCategory === category;
       const matchesSearch =
         query.length === 0 ||
         [
           resource.title,
           resource.name,
           resource.description,
-          resource.category,
+          resourceCategory,
+          creatorLabel,
           resource.creatorWallet,
-          ...resource.tags,
+          ...(resource.tags ?? []),
         ]
           .join(" ")
           .toLowerCase()
@@ -52,8 +93,14 @@ export default function ExplorePage() {
     });
 
     return [...filtered].sort((a, b) => {
-      if (sortMode === "price-asc") return a.priceUSDC - b.priceUSDC;
-      if (sortMode === "price-desc") return b.priceUSDC - a.priceUSDC;
+      if (sortMode === "price-asc") {
+        return a.priceUSDC - b.priceUSDC;
+      }
+
+      if (sortMode === "price-desc") {
+        return b.priceUSDC - a.priceUSDC;
+      }
+
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
   }, [category, resources, search, sortMode]);
@@ -61,15 +108,19 @@ export default function ExplorePage() {
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
       <Navbar />
-      <main style={{ maxWidth: 1200, margin: "0 auto", padding: "44px 24px 80px" }}>
-        <header style={{ marginBottom: 28 }}>
-          <p style={eyebrowStyle}>Explore</p>
-          <h1 style={{ fontSize: 28, color: "var(--text-primary)", marginBottom: 10 }}>
-            Marketplace
-          </h1>
-          <p style={{ fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.7 }}>
-            Browse published resources from AccessMesh creators.
-          </p>
+      <main style={{ maxWidth: 1240, margin: "0 auto", padding: "44px 24px 80px" }}>
+        <header style={heroStyle}>
+          <div style={heroCopyStyle}>
+            <p style={eyebrowStyle}>Explore</p>
+            <h1 style={titleStyle}>Marketplace</h1>
+            <p style={subtitleStyle}>
+              Browse published resources from creators on AccessMesh.
+            </p>
+          </div>
+          <div style={heroStatsStyle}>
+            <StatCard label="Published resources" value={resources.length} />
+            <StatCard label="Visible results" value={visibleResources.length} />
+          </div>
         </header>
 
         <section style={toolbarStyle} aria-label="Marketplace filters">
@@ -78,7 +129,7 @@ export default function ExplorePage() {
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search title, description, creator, or tag"
+              placeholder="Search titles, descriptions, creators, or tags"
               style={inputStyle}
             />
           </label>
@@ -87,14 +138,17 @@ export default function ExplorePage() {
             <span style={labelStyle}>Category</span>
             <select
               value={category}
-              onChange={(event) => setCategory(event.target.value as ResourceType | "ALL")}
+              onChange={(event) => setCategory(event.target.value)}
               style={inputStyle}
             >
-              {categories.map((item) => (
-                <option key={item} value={item}>
-                  {item === "ALL" ? "All categories" : item}
-                </option>
-              ))}
+              <option value="ALL">All categories</option>
+              {categoryOptions
+                .filter((item) => item !== "ALL")
+                .map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
             </select>
           </label>
 
@@ -113,7 +167,9 @@ export default function ExplorePage() {
         </section>
 
         {loading ? (
-          <p style={{ color: "var(--text-muted)" }}>Loading resources...</p>
+          <section style={emptyStateStyle}>
+            <p style={{ color: "var(--text-muted)" }}>Loading published resources...</p>
+          </section>
         ) : visibleResources.length > 0 ? (
           <div style={gridStyle}>
             {visibleResources.map((resource) => (
@@ -121,11 +177,11 @@ export default function ExplorePage() {
             ))}
           </div>
         ) : (
-          <div style={emptyStyle}>
+          <section style={emptyStateStyle}>
             <p style={{ color: "var(--text-secondary)", lineHeight: 1.6 }}>
               No resources match the current marketplace filters.
             </p>
-          </div>
+          </section>
         )}
       </main>
     </div>
@@ -133,56 +189,49 @@ export default function ExplorePage() {
 }
 
 function ResourceCard({ resource }: { resource: ResourceMeta }) {
+  const resourceCategory = resource.resourceCategory ?? resource.category;
+  const creatorDisplay =
+    resource.creatorDisplayName?.trim().length
+      ? resource.creatorDisplayName.trim()
+      : null;
+  const creatorWallet = shortAddress(resource.creatorWallet);
+  const coverImageUrl = resource.coverImage ? encodeURI(resource.coverImage) : "";
+
   return (
     <Link href={`/resource/${resource.id}`} style={cardStyle}>
-      <div style={{ padding: 18 }}>
+      <div style={coverWrapStyle}>
         <div
           style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 12,
-            alignItems: "center",
-            marginBottom: 12,
+            ...coverStyle,
+            backgroundImage: resource.coverImage
+              ? `linear-gradient(180deg, rgba(6, 8, 10, 0.08), rgba(6, 8, 10, 0.68)), url("${coverImageUrl}")`
+              : "linear-gradient(135deg, rgba(0, 194, 168, 0.22), rgba(255, 255, 255, 0.03))",
           }}
         >
-          <span style={categoryStyle}>{resource.category}</span>
+          <span style={coverTagStyle}>{resourceCategory}</span>
+        </div>
+      </div>
+
+      <div style={cardBodyStyle}>
+        <div style={topRowStyle}>
+          <span style={categoryStyle}>{resourceCategory}</span>
           <span style={priceStyle}>{formatUSDC(resource.priceUSDC)}</span>
         </div>
 
-        <h2
-          style={{
-            fontSize: 17,
-            color: "var(--text-primary)",
-            marginBottom: 8,
-            lineHeight: 1.35,
-          }}
-        >
-          {resource.title || resource.name}
-        </h2>
-        <p
-          style={{
-            fontSize: 13,
-            color: "var(--text-secondary)",
-            lineHeight: 1.6,
-            marginBottom: 16,
-          }}
-        >
-          {resource.description}
-        </p>
+        <h2 style={titleCardStyle}>{resource.title || resource.name}</h2>
+        <p style={descriptionStyle}>{resource.description}</p>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr auto",
-            gap: 12,
-            alignItems: "end",
-            borderTop: "1px solid var(--border-subtle)",
-            paddingTop: 14,
-          }}
-        >
-          <div>
+        <div style={footerGridStyle}>
+          <div style={creatorStyle}>
             <p style={metaLabelStyle}>Creator</p>
-            <p style={metaValueStyle}>{shortAddress(resource.creatorWallet)}</p>
+            {creatorDisplay ? (
+              <>
+                <p style={creatorNameStyle}>{creatorDisplay}</p>
+                <p style={creatorWalletStyle}>{creatorWallet}</p>
+              </>
+            ) : (
+              <p style={creatorWalletStyle}>{creatorWallet}</p>
+            )}
           </div>
           <div style={{ textAlign: "right" }}>
             <p style={metaLabelStyle}>Unlocks</p>
@@ -194,18 +243,63 @@ function ResourceCard({ resource }: { resource: ResourceMeta }) {
   );
 }
 
+function StatCard({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div style={statCardStyle}>
+      <p style={statLabelStyle}>{label}</p>
+      <p style={statValueStyle}>{value}</p>
+    </div>
+  );
+}
+
+const heroStyle = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.5fr) minmax(320px, 0.85fr)",
+  gap: 18,
+  alignItems: "stretch",
+  marginBottom: 28,
+} satisfies CSSProperties;
+
+const heroCopyStyle = {
+  background:
+    "linear-gradient(135deg, rgba(0,194,168,0.08), rgba(255,255,255,0.02)), var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 12,
+  padding: 28,
+} satisfies CSSProperties;
+
+const heroStatsStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 14,
+} satisfies CSSProperties;
+
 const eyebrowStyle = {
   fontFamily: "var(--font-mono)",
   fontSize: 11,
   color: "var(--accent)",
   textTransform: "uppercase",
   letterSpacing: "0.1em",
-  marginBottom: 10,
+  marginBottom: 12,
+} satisfies CSSProperties;
+
+const titleStyle = {
+  fontSize: 36,
+  lineHeight: 1.08,
+  color: "var(--text-primary)",
+  marginBottom: 12,
+} satisfies CSSProperties;
+
+const subtitleStyle = {
+  fontSize: 15,
+  color: "var(--text-secondary)",
+  lineHeight: 1.7,
+  maxWidth: 640,
 } satisfies CSSProperties;
 
 const toolbarStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
   gap: 14,
   marginBottom: 24,
 } satisfies CSSProperties;
@@ -238,24 +332,67 @@ const inputStyle = {
 
 const gridStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-  gap: 16,
+  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+  gap: 18,
 } satisfies CSSProperties;
 
 const cardStyle = {
   display: "block",
   background: "var(--surface)",
   border: "1px solid var(--border)",
-  borderRadius: 8,
+  borderRadius: 14,
   color: "inherit",
   textDecoration: "none",
-  minHeight: 230,
+  overflow: "hidden",
+  minHeight: 360,
+  transition: "transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease",
+} satisfies CSSProperties;
+
+const coverWrapStyle = {
+  borderBottom: "1px solid var(--border-subtle)",
+} satisfies CSSProperties;
+
+const coverStyle = {
+  position: "relative",
+  height: 170,
+  padding: 16,
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  backgroundSize: "cover",
+  backgroundPosition: "center",
+  backgroundRepeat: "no-repeat",
+} satisfies CSSProperties;
+
+const coverTagStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 10,
+  color: "#fff",
+  background: "rgba(0,0,0,0.45)",
+  border: "1px solid rgba(255,255,255,0.12)",
+  borderRadius: 999,
+  padding: "6px 10px",
+  backdropFilter: "blur(8px)",
+} satisfies CSSProperties;
+
+const cardBodyStyle = {
+  padding: 18,
+} satisfies CSSProperties;
+
+const topRowStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  alignItems: "center",
+  marginBottom: 12,
 } satisfies CSSProperties;
 
 const categoryStyle = {
   fontFamily: "var(--font-mono)",
   fontSize: 11,
   color: "var(--accent)",
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
 } satisfies CSSProperties;
 
 const priceStyle = {
@@ -263,6 +400,39 @@ const priceStyle = {
   fontSize: 12,
   color: "var(--text-primary)",
   whiteSpace: "nowrap",
+} satisfies CSSProperties;
+
+const titleCardStyle = {
+  fontSize: 18,
+  lineHeight: 1.3,
+  color: "var(--text-primary)",
+  marginBottom: 10,
+  minHeight: 48,
+} satisfies CSSProperties;
+
+const descriptionStyle = {
+  fontSize: 13,
+  color: "var(--text-secondary)",
+  lineHeight: 1.65,
+  marginBottom: 18,
+  display: "-webkit-box",
+  WebkitLineClamp: 4,
+  WebkitBoxOrient: "vertical",
+  overflow: "hidden",
+  minHeight: 86,
+} satisfies CSSProperties;
+
+const footerGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
+  gap: 12,
+  alignItems: "end",
+  borderTop: "1px solid var(--border-subtle)",
+  paddingTop: 14,
+} satisfies CSSProperties;
+
+const creatorStyle = {
+  minWidth: 0,
 } satisfies CSSProperties;
 
 const metaLabelStyle = {
@@ -274,15 +444,60 @@ const metaLabelStyle = {
   marginBottom: 5,
 } satisfies CSSProperties;
 
+const creatorNameStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 13,
+  color: "var(--text-primary)",
+  lineHeight: 1.5,
+  overflowWrap: "anywhere",
+} satisfies CSSProperties;
+
+const creatorWalletStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 12,
+  color: "var(--text-secondary)",
+  lineHeight: 1.5,
+  overflowWrap: "anywhere",
+} satisfies CSSProperties;
+
 const metaValueStyle = {
   fontFamily: "var(--font-mono)",
   fontSize: 12,
   color: "var(--text-secondary)",
 } satisfies CSSProperties;
 
-const emptyStyle = {
+const statCardStyle = {
+  background:
+    "linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0)), var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 12,
+  padding: 18,
+  minWidth: 0,
+  display: "flex",
+  flexDirection: "column",
+  justifyContent: "space-between",
+} satisfies CSSProperties;
+
+const statLabelStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 10,
+  color: "var(--text-muted)",
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  marginBottom: 12,
+} satisfies CSSProperties;
+
+const statValueStyle = {
+  fontSize: 26,
+  lineHeight: 1.15,
+  fontWeight: 600,
+  color: "var(--text-primary)",
+  wordBreak: "break-word",
+} satisfies CSSProperties;
+
+const emptyStateStyle = {
   background: "var(--surface)",
   border: "1px solid var(--border)",
-  borderRadius: 8,
+  borderRadius: 12,
   padding: 24,
 } satisfies CSSProperties;

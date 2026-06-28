@@ -1,3 +1,5 @@
+import { ArcTestnet } from "@circle-fin/app-kit/chains";
+
 type Props = {
   accessToken: string;
   resourceId: string;
@@ -12,6 +14,7 @@ export function UnlockStatusTracker({
   expiresAt,
 }: Props) {
   const expiry = expiresAt ? new Date(expiresAt).toLocaleString() : null;
+  const explorerUrl = `${ArcTestnet.explorerUrl.replace(/\/+$/, "")}/tx/${txHash}`;
 
   return (
     <div
@@ -93,7 +96,7 @@ export function UnlockStatusTracker({
               marginBottom: 6,
             }}
           >
-            Transaction Hash
+            Transaction
           </p>
           <p
             style={{
@@ -106,6 +109,21 @@ export function UnlockStatusTracker({
           >
             {txHash}
           </p>
+          <a
+            href={explorerUrl}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              display: "inline-block",
+              marginTop: 8,
+              fontFamily: "var(--font-mono)",
+              fontSize: 12,
+              color: "var(--accent)",
+              textDecoration: "none",
+            }}
+          >
+            View on Explorer
+          </a>
         </div>
 
         <div style={{ marginBottom: 16 }}>

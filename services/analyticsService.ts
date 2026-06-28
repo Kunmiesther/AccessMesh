@@ -3,6 +3,8 @@ import { normalizeAddress } from "@/lib/validation";
 import { getX402Analytics } from "@/services/x402AccessService";
 import type { CreatedResourceSummary, CreatorAnalytics, ProtocolStats } from "@/types";
 
+const CREATOR_REVENUE_SHARE = 0.95;
+
 export async function getProtocolStats(): Promise<ProtocolStats> {
   const [totalResources, purchases, settledPayments, creators] =
     await Promise.all([
@@ -90,8 +92,8 @@ export async function getCreatorAnalytics(
     const fallbackSettlement = paymentResourceCounts.get(resource.id);
     const revenue =
       resource.purchases.length > 0
-        ? settledFromPurchases
-        : fallbackSettlement?.revenue ?? 0;
+        ? settledFromPurchases * CREATOR_REVENUE_SHARE
+        : (fallbackSettlement?.revenue ?? 0) * CREATOR_REVENUE_SHARE;
     const unlockCount =
       resource.purchases.length > 0
         ? resource.purchases.length
@@ -156,7 +158,7 @@ export async function getCreatedResourceSummaries(
     revenue: resource.purchases.reduce(
       (sum, purchase) => sum + purchase.amountUSDC,
       0,
-    ),
+    ) * CREATOR_REVENUE_SHARE,
   }));
 }
 

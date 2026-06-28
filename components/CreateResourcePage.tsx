@@ -7,14 +7,33 @@ import { FormEvent, useEffect, useState } from "react";
 import { Navbar } from "@/components/Navbar";
 import { postResource } from "@/lib/api";
 import { useWallet } from "@/lib/ui/WalletContext";
-import type { ResourceType } from "@/types";
+import type { PublishedResourceType } from "@/types";
 
-const categories: ResourceType[] = ["CONTENT", "API", "TOOL", "DATASET"];
+const resourceTypeOptions: Array<{
+  value: PublishedResourceType;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "ARTICLE",
+    label: "Article",
+    description: "Publish markdown content directly on the platform.",
+  },
+  {
+    value: "FILE_UPLOAD",
+    label: "File Upload",
+    description: "Upload a PDF, ZIP, or DOCX file for gated delivery.",
+  },
+  {
+    value: "EXTERNAL_LINK",
+    label: "External Link",
+    description: "Send buyers to an external URL after unlock.",
+  },
+];
 
 type PublishState =
   | { status: "idle" }
   | { status: "submitting" }
-  | { status: "success"; resourceId: string }
   | { status: "error"; message: string };
 
 export function CreateResourcePage() {
@@ -24,15 +43,17 @@ export function CreateResourcePage() {
   const [state, setState] = useState<PublishState>({ status: "idle" });
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [category, setCategory] = useState<ResourceType>("CONTENT");
+  const [category, setCategory] = useState("");
   const [priceUSDC, setPriceUSDC] = useState("");
-  const [resourceUrl, setResourceUrl] = useState("");
+  const [resourceType, setResourceType] = useState<PublishedResourceType>("ARTICLE");
+  const [articleContent, setArticleContent] = useState("");
   const [resourceFile, setResourceFile] = useState<File | null>(null);
+  const [externalUrl, setExternalUrl] = useState("");
   const [coverImage, setCoverImage] = useState("");
   const [tags, setTags] = useState("");
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setAuthReady(true), 200);
+    const timer = window.setTimeout(() => setAuthReady(true), 150);
     return () => window.clearTimeout(timer);
   }, []);
 
@@ -50,37 +71,32 @@ export function CreateResourcePage() {
       return;
     }
 
-    if (!resourceUrl.trim() && !resourceFile) {
-      setState({
-        status: "error",
-        message: "Add a resource URL or upload a resource file.",
-      });
-      return;
-    }
-
     setState({ status: "submitting" });
 
     try {
-      const fileDataUrl = resourceFile
-        ? await readFileAsDataUrl(resourceFile)
-        : undefined;
-      const response = await postResource({
-        creatorWallet: address,
-        title,
-        description,
-        category,
-        priceUSDC,
-        resourceUrl: resourceUrl.trim() || undefined,
-        fileName: resourceFile?.name,
-        fileDataUrl,
-        coverImage: coverImage.trim() || undefined,
-        tags,
+      const resourceData = await buildResourceData({
+        resourceType,
+        articleContent,
+        resourceFile,
+        externalUrl,
       });
 
-      setState({ status: "success", resourceId: response.resource.id });
-      window.setTimeout(() => {
-        router.push(`/access/${response.resource.id}`);
-      }, 900);
+      const response = await postResource(
+        {
+          creatorWallet: address,
+          title,
+          description,
+          category,
+          priceUSDC,
+          resourceType,
+          coverImage: coverImage.trim() || undefined,
+          tags,
+          ...resourceData,
+        },
+        { wallet: address },
+      );
+
+      router.replace(`/resource/${response.resource.id}?published=1`);
     } catch (error) {
       setState({
         status: "error",
@@ -90,32 +106,38 @@ export function CreateResourcePage() {
     }
   }
 
-  const disabled = state.status === "submitting" || state.status === "success";
+  const disabled = state.status === "submitting";
+  const activeResourceType = resourceTypeOptions.find(
+    (option) => option.value === resourceType,
+  );
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
       <Navbar />
-      <main style={{ maxWidth: 860, margin: "0 auto", padding: "44px 24px 80px" }}>
+      <main style={{ maxWidth: 920, margin: "0 auto", padding: "44px 24px 80px" }}>
         <header style={{ marginBottom: 28 }}>
           <p style={eyebrowStyle}>Create resource</p>
-          <h1 style={{ fontSize: 28, color: "var(--text-primary)", marginBottom: 10 }}>
-            Publish premium access
+          <h1 style={{ fontSize: 30, color: "var(--text-primary)", marginBottom: 10 }}>
+            Publish a paid resource
           </h1>
+          <p style={bodyStyle}>
+            Create an Article, File Upload, or External Link and publish it behind a USDC price.
+          </p>
           {connected && address ? (
-            <p style={bodyStyle}>
-              Publishing as{" "}
+            <p style={{ ...bodyStyle, marginTop: 10 }}>
+              Active wallet:{" "}
               <span style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
                 {address}
               </span>
             </p>
           ) : (
-            <p style={bodyStyle}>Redirecting to wallet authentication...</p>
+            <p style={{ ...bodyStyle, marginTop: 10 }}>Authenticating wallet...</p>
           )}
         </header>
 
         {authReady && connected && address ? (
           <form onSubmit={handleSubmit} style={panelStyle}>
-            <div style={{ display: "grid", gap: 18 }}>
+            <div style={gridStyle}>
               <Field label="Title" htmlFor="title" required>
                 <input
                   id="title"
@@ -139,28 +161,17 @@ export function CreateResourcePage() {
                 />
               </Field>
 
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                  gap: 16,
-                }}
-              >
+              <div style={twoColumnStyle}>
                 <Field label="Category" htmlFor="category" required>
-                  <select
+                  <input
                     id="category"
                     value={category}
                     disabled={disabled}
-                    onChange={(event) => setCategory(event.target.value as ResourceType)}
+                    onChange={(event) => setCategory(event.target.value)}
                     required
+                    placeholder="Guides, Templates, Research, etc."
                     style={inputStyle}
-                  >
-                    {categories.map((item) => (
-                      <option key={item} value={item}>
-                        {item}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </Field>
 
                 <Field label="Price (USDC)" htmlFor="priceUSDC" required>
@@ -174,34 +185,95 @@ export function CreateResourcePage() {
                     disabled={disabled}
                     onChange={(event) => setPriceUSDC(event.target.value)}
                     required
+                    placeholder="0.00"
                     style={inputStyle}
                   />
                 </Field>
               </div>
 
-              <Field label="Resource URL" htmlFor="resourceUrl">
-                <input
-                  id="resourceUrl"
-                  type="url"
-                  value={resourceUrl}
-                  disabled={disabled || Boolean(resourceFile)}
-                  onChange={(event) => setResourceUrl(event.target.value)}
-                  placeholder="https://"
+              <Field label="Resource Type" htmlFor="resourceType" required>
+                <select
+                  id="resourceType"
+                  value={resourceType}
+                  disabled={disabled}
+                  onChange={(event) => {
+                    setResourceType(event.target.value as PublishedResourceType);
+                    setState({ status: "idle" });
+                    setArticleContent("");
+                    setResourceFile(null);
+                    setExternalUrl("");
+                  }}
+                  required
                   style={inputStyle}
-                />
+                >
+                  {resourceTypeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <p style={helperTextStyle}>{activeResourceType?.description}</p>
               </Field>
 
-              <Field label="Resource file" htmlFor="resourceFile">
-                <input
-                  id="resourceFile"
-                  type="file"
-                  disabled={disabled || Boolean(resourceUrl.trim())}
-                  onChange={(event) =>
-                    setResourceFile(event.target.files?.[0] ?? null)
-                  }
-                  style={inputStyle}
-                />
-              </Field>
+              {resourceType === "ARTICLE" && (
+                <Field label="Markdown editor" htmlFor="articleContent" required>
+                  <textarea
+                    id="articleContent"
+                    value={articleContent}
+                    disabled={disabled}
+                    onChange={(event) => setArticleContent(event.target.value)}
+                    required
+                    rows={12}
+                    placeholder="# Start writing..."
+                    spellCheck={false}
+                    style={{
+                      ...inputStyle,
+                      minHeight: 280,
+                      fontFamily: "var(--font-mono)",
+                      lineHeight: 1.65,
+                    }}
+                  />
+                  <p style={helperTextStyle}>
+                    Markdown is supported for headings, lists, links, and code blocks.
+                  </p>
+                </Field>
+              )}
+
+              {resourceType === "FILE_UPLOAD" && (
+                <Field label="Upload PDF, ZIP, or DOCX" htmlFor="resourceFile" required>
+                  <input
+                    id="resourceFile"
+                    type="file"
+                    accept=".pdf,.zip,.docx,application/pdf,application/zip,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    disabled={disabled}
+                    onChange={(event) =>
+                      setResourceFile(event.target.files?.[0] ?? null)
+                    }
+                    required
+                    style={fileInputStyle}
+                  />
+                  <p style={helperTextStyle}>
+                    {resourceFile
+                      ? `Selected: ${resourceFile.name}`
+                      : "Accepted formats: PDF, ZIP, and DOCX."}
+                  </p>
+                </Field>
+              )}
+
+              {resourceType === "EXTERNAL_LINK" && (
+                <Field label="URL" htmlFor="externalUrl" required>
+                  <input
+                    id="externalUrl"
+                    type="url"
+                    value={externalUrl}
+                    disabled={disabled}
+                    onChange={(event) => setExternalUrl(event.target.value)}
+                    required
+                    placeholder="https://"
+                    style={inputStyle}
+                  />
+                </Field>
+              )}
 
               <Field label="Cover image" htmlFor="coverImage">
                 <input
@@ -231,48 +303,17 @@ export function CreateResourcePage() {
               <p style={{ ...messageStyle, color: "var(--error)" }}>{state.message}</p>
             )}
 
-            {state.status === "success" && (
-              <p style={{ ...messageStyle, color: "var(--success)" }}>
-                Resource published. Redirecting to the resource detail page...
-              </p>
-            )}
-
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: 12,
-                marginTop: 24,
-                flexWrap: "wrap",
-              }}
-            >
-              <Link
-                href="/dashboard"
-                style={{
-                  color: "var(--text-secondary)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 4,
-                  padding: "10px 14px",
-                  textDecoration: "none",
-                  fontSize: 13,
-                }}
-              >
+            <div style={actionsStyle}>
+              <Link href="/dashboard" style={secondaryButtonStyle}>
                 Cancel
               </Link>
               <button
                 type="submit"
                 disabled={disabled}
                 style={{
-                  background:
-                    state.status === "submitting"
-                      ? "var(--accent-dim)"
-                      : "var(--accent)",
-                  color: state.status === "submitting" ? "var(--text-secondary)" : "#000",
-                  border: "none",
-                  borderRadius: 4,
-                  padding: "10px 16px",
-                  fontSize: 13,
-                  fontWeight: 600,
+                  ...primaryButtonStyle,
+                  background: disabled ? "var(--accent-dim)" : "var(--accent)",
+                  color: disabled ? "var(--text-secondary)" : "#000",
                   cursor: disabled ? "wait" : "pointer",
                 }}
               >
@@ -281,24 +322,12 @@ export function CreateResourcePage() {
             </div>
           </form>
         ) : (
-          <div style={panelStyle}>
-            <p style={bodyStyle}>Connect a wallet before publishing resources.</p>
-            <Link
-              href="/wallet?next=/create"
-              style={{
-                display: "inline-block",
-                marginTop: 16,
-                background: "var(--accent)",
-                color: "#000",
-                borderRadius: 4,
-                padding: "9px 13px",
-                textDecoration: "none",
-                fontWeight: 600,
-              }}
-            >
+          <section style={panelStyle}>
+            <p style={bodyStyle}>Connect your authenticated wallet before publishing.</p>
+            <Link href="/wallet?next=/create" style={{ ...primaryButtonStyle, marginTop: 16 }}>
               Connect Wallet
             </Link>
-          </div>
+          </section>
         )}
       </main>
     </div>
@@ -325,6 +354,46 @@ function Field({
       {children}
     </div>
   );
+}
+
+async function buildResourceData(params: {
+  resourceType: PublishedResourceType;
+  articleContent: string;
+  resourceFile: File | null;
+  externalUrl: string;
+}) {
+  if (params.resourceType === "ARTICLE") {
+    const content = params.articleContent.trim();
+    if (!content) {
+      throw new Error("Markdown content is required for articles.");
+    }
+
+    return {
+      articleContent: content,
+    };
+  }
+
+  if (params.resourceType === "FILE_UPLOAD") {
+    if (!params.resourceFile) {
+      throw new Error("Select a PDF, ZIP, or DOCX file to publish.");
+    }
+
+    const fileDataUrl = await readFileAsDataUrl(params.resourceFile);
+    return {
+      fileName: params.resourceFile.name,
+      fileMimeType: params.resourceFile.type || undefined,
+      fileDataUrl,
+    };
+  }
+
+  const url = params.externalUrl.trim();
+  if (!url) {
+    throw new Error("Add a URL for the external link resource.");
+  }
+
+  return {
+    externalUrl: url,
+  };
 }
 
 function readFileAsDataUrl(file: File) {
@@ -359,6 +428,17 @@ const panelStyle = {
   padding: 24,
 } satisfies CSSProperties;
 
+const gridStyle = {
+  display: "grid",
+  gap: 18,
+} satisfies CSSProperties;
+
+const twoColumnStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: 16,
+} satisfies CSSProperties;
+
 const labelStyle = {
   display: "block",
   fontFamily: "var(--font-mono)",
@@ -380,8 +460,51 @@ const inputStyle = {
   outline: "none",
 } satisfies CSSProperties;
 
+const fileInputStyle = {
+  ...inputStyle,
+  paddingTop: 9,
+  paddingBottom: 9,
+} satisfies CSSProperties;
+
+const helperTextStyle = {
+  marginTop: 8,
+  color: "var(--text-muted)",
+  fontSize: 12,
+  lineHeight: 1.6,
+} satisfies CSSProperties;
+
 const messageStyle = {
   marginTop: 18,
   fontSize: 13,
   lineHeight: 1.6,
+} satisfies CSSProperties;
+
+const actionsStyle = {
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 12,
+  marginTop: 24,
+  flexWrap: "wrap",
+} satisfies CSSProperties;
+
+const primaryButtonStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "var(--accent)",
+  color: "#000",
+  border: "1px solid var(--accent)",
+  borderRadius: 4,
+  padding: "10px 16px",
+  textDecoration: "none",
+  fontSize: 13,
+  fontWeight: 600,
+  minWidth: 110,
+} satisfies CSSProperties;
+
+const secondaryButtonStyle = {
+  ...primaryButtonStyle,
+  background: "transparent",
+  color: "var(--text-secondary)",
+  border: "1px solid var(--border)",
 } satisfies CSSProperties;

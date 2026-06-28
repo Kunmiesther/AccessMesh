@@ -6,14 +6,28 @@ import {
   parsePositiveUsdcAmount,
 } from "@/lib/validation";
 import { ActivityType, recordActivity } from "@/services/activityService";
+import { getTreasuryWallet, splitUsdcAmount } from "@/services/paymentSplit";
 import type {
   CreateResourceRequest,
+  PublishedResourceType,
   ResourceDetail,
   ResourceMeta,
   ResourceType,
 } from "@/types";
 
 const RESOURCE_TYPES = ["API", "CONTENT", "TOOL", "DATASET"] as const;
+const PUBLISHED_RESOURCE_TYPES = [
+  "ARTICLE",
+  "FILE_UPLOAD",
+  "EXTERNAL_LINK",
+] as const;
+
+type ResourceRecord = Resource & {
+  creatorDisplayName: string | null;
+  resourceCategory: string;
+  resourceType: string;
+  resourceContent: string;
+};
 
 type ListResourcesOptions = {
   ownerId?: string;
@@ -23,11 +37,16 @@ type ListResourcesOptions = {
 
 export async function createResource(input: CreateResourceRequest) {
   const creatorWallet = normalizeAddress(input.creatorWallet, "creatorWallet");
+  const creatorDisplayName = normalizeOptionalText(input.creatorDisplayName);
   const title = requireText(input.title, "title");
   const description = requireText(input.description, "description");
-  const category = normalizeResourceType(input.category);
+  const resourceCategory = requireText(input.category, "category");
+  const resourceType = resolvePublishedResourceType(input);
   const priceUSDC = parsePositiveUsdcAmount(input.priceUSDC);
-  const resourceUrl = normalizeResourceLocation(input);
+  const { resourceUrl, resourceContent } = buildResourceAsset(
+    input,
+    resourceType,
+  );
   const coverImage = normalizeOptionalText(input.coverImage);
   const tags = normalizeTags(input.tags);
 
@@ -46,11 +65,15 @@ export async function createResource(input: CreateResourceRequest) {
     data: {
       ownerId: owner.id,
       creatorWallet,
+      creatorDisplayName,
       title,
       name: title,
       description,
-      category,
-      type: category,
+      category: "CONTENT",
+      type: "CONTENT",
+      resourceCategory,
+      resourceType,
+      resourceContent,
       priceUSDC,
       resourceUrl,
       endpoint: resourceUrl,
@@ -68,7 +91,7 @@ export async function createResource(input: CreateResourceRequest) {
     title: resource.title || resource.name,
   }).catch(() => undefined);
 
-  return toResourceMeta(resource);
+  return toResourceMeta(resource as ResourceRecord);
 }
 
 export async function listResources(options: ListResourcesOptions = {}) {
@@ -81,7 +104,7 @@ export async function listResources(options: ListResourcesOptions = {}) {
     take: options.limit,
   });
 
-  return resources.map(toResourceMeta);
+  return resources.map((item) => toResourceMeta(item as ResourceRecord));
 }
 
 export async function getResource(id: string) {
@@ -89,7 +112,7 @@ export async function getResource(id: string) {
     where: { id },
   });
 
-  return resource ? toResourceMeta(resource) : null;
+  return resource ? toResourceMeta(resource as ResourceRecord) : null;
 }
 
 export async function getResourceDetail(id: string, wallet?: string | null) {
@@ -116,7 +139,7 @@ export async function getResourceDetail(id: string, wallet?: string | null) {
         })),
     );
 
-  return toResourceDetail(resource, owned);
+  return toResourceDetail(resource as ResourceRecord, owned);
 }
 
 export async function validateAccess(resourceId: string, wallet: string) {
@@ -129,7 +152,7 @@ export async function validateAccess(resourceId: string, wallet: string) {
     return {
       allowed: false,
       reason: "RESOURCE_NOT_FOUND_OR_INACTIVE",
-      resource: resource ? toResourceMeta(resource) : null,
+      resource: resource ? toResourceMeta(resource as ResourceRecord) : null,
       payment: null,
     };
   }
@@ -138,7 +161,7 @@ export async function validateAccess(resourceId: string, wallet: string) {
     return {
       allowed: true,
       reason: "CREATOR_WALLET_FOUND",
-      resource: toResourceMeta(resource),
+      resource: toResourceMeta(resource as ResourceRecord),
       payment: null,
     };
   }
@@ -155,7 +178,7 @@ export async function validateAccess(resourceId: string, wallet: string) {
   return {
     allowed: Boolean(payment),
     reason: payment ? "SETTLED_PAYMENT_FOUND" : "PAYMENT_REQUIRED",
-    resource: toResourceMeta(resource),
+    resource: toResourceMeta(resource as ResourceRecord),
     payment,
   };
 }
@@ -176,20 +199,48 @@ export async function getResourceProviderWallet(resourceId: string) {
   };
 }
 
-function toResourceMeta(resource: Resource): ResourceMeta {
+export async function getResourcePaymentParticipants(resourceId: string) {
+  const resource = await prisma.resource.findUnique({
+    where: { id: resourceId },
+    include: { owner: true },
+  });
+
+  if (!resource || !resource.isActive) {
+    throw new InputError("resource not found or inactive");
+  }
+
+  const creatorWallet = normalizeAddress(resource.owner.walletAddress, "creatorWallet");
+  const treasuryWallet = getTreasuryWallet();
+  if (!treasuryWallet) {
+    throw new InputError("AccessMesh treasury wallet is not configured");
+  }
+  const split = splitUsdcAmount(resource.priceUSDC);
+
+  return {
+    resource,
+    creatorWallet,
+    treasuryWallet,
+    creatorAmountUSDC: split.creatorAmountUSDC,
+    treasuryAmountUSDC: split.treasuryAmountUSDC,
+  };
+}
+
+function toResourceMeta(resource: ResourceRecord): ResourceMeta {
   const type = normalizeStoredResourceType(resource.type || resource.category);
+  const resourceType = normalizeStoredPublishedResourceType(resource.resourceType);
 
   return {
     id: resource.id,
     creatorWallet: resource.creatorWallet,
+    creatorDisplayName: normalizeOptionalStoredText(resource.creatorDisplayName),
     title: resource.title || resource.name,
     name: resource.name,
     description: resource.description,
     category: normalizeStoredResourceType(resource.category),
     type,
+    resourceCategory: normalizeOptionalStoredText(resource.resourceCategory),
+    resourceType,
     priceUSDC: resource.priceUSDC,
-    resourceUrl: resource.resourceUrl || resource.endpoint,
-    endpoint: resource.endpoint,
     coverImage: resource.coverImage,
     tags: parseStoredTags(resource.tags),
     unlockCount: resource.unlockCount,
@@ -198,14 +249,17 @@ function toResourceMeta(resource: Resource): ResourceMeta {
   };
 }
 
-function toResourceDetail(resource: Resource, owned: boolean): ResourceDetail {
+function toResourceDetail(resource: ResourceRecord, owned: boolean): ResourceDetail {
   const meta = toResourceMeta(resource);
+  const resourceUrl = normalizeOptionalStoredText(resource.resourceUrl || resource.endpoint);
+  const resourceContent = normalizeOptionalStoredText(resource.resourceContent);
 
   return {
     ...meta,
     owned,
-    resourceUrl: owned ? meta.resourceUrl : undefined,
-    endpoint: owned ? meta.endpoint : undefined,
+    resourceUrl: owned ? resourceUrl : undefined,
+    endpoint: owned ? resourceUrl : undefined,
+    resourceContent: owned ? resourceContent : undefined,
   };
 }
 
@@ -226,38 +280,95 @@ function normalizeOptionalText(value: unknown) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function normalizeResourceLocation(input: CreateResourceRequest) {
-  const resourceUrl = normalizeOptionalText(input.resourceUrl);
-  const fileDataUrl = normalizeOptionalText(input.fileDataUrl);
-
-  if (resourceUrl) {
-    return resourceUrl;
-  }
-
-  if (fileDataUrl) {
-    return fileDataUrl;
-  }
-
-  throw new InputError("resourceUrl or file upload is required");
-}
-
-function normalizeResourceType(value: unknown): ResourceType {
+function normalizePublishedResourceType(
+  value: unknown,
+): PublishedResourceType {
   if (typeof value !== "string") {
-    throw new InputError("category is required");
+    throw new InputError("resourceType is required");
   }
 
   const normalized = value.toUpperCase();
-  if (!RESOURCE_TYPES.includes(normalized as ResourceType)) {
-    throw new InputError("category must be API, CONTENT, TOOL, or DATASET");
+  if (!PUBLISHED_RESOURCE_TYPES.includes(normalized as PublishedResourceType)) {
+    throw new InputError(
+      "resourceType must be ARTICLE, FILE_UPLOAD, or EXTERNAL_LINK",
+    );
   }
 
-  return normalized as ResourceType;
+  return normalized as PublishedResourceType;
+}
+
+function resolvePublishedResourceType(input: CreateResourceRequest) {
+  if (input.resourceType) {
+    return normalizePublishedResourceType(input.resourceType);
+  }
+
+  if (normalizeOptionalText(input.articleContent)) {
+    return "ARTICLE";
+  }
+
+  if (normalizeOptionalText(input.fileDataUrl)) {
+    return "FILE_UPLOAD";
+  }
+
+  const externalUrl = normalizeOptionalText(input.externalUrl ?? input.resourceUrl);
+  if (externalUrl) {
+    return "EXTERNAL_LINK";
+  }
+
+  throw new InputError(
+    "resourceType is required unless articleContent, fileDataUrl, or externalUrl is provided",
+  );
+}
+
+function buildResourceAsset(
+  input: CreateResourceRequest,
+  resourceType: PublishedResourceType,
+) {
+  switch (resourceType) {
+    case "ARTICLE": {
+      const markdown = requireText(input.articleContent, "articleContent");
+      return {
+        resourceUrl: toDataUrl("text/markdown;charset=utf-8", markdown),
+        resourceContent: markdown,
+      };
+    }
+    case "FILE_UPLOAD": {
+      const fileName = requireText(input.fileName, "fileName");
+      const fileDataUrl = requireText(input.fileDataUrl, "fileDataUrl");
+      validateFileUpload(fileName, fileDataUrl, input.fileMimeType);
+      return {
+        resourceUrl: fileDataUrl,
+        resourceContent: JSON.stringify({
+          fileName,
+          fileMimeType: normalizeOptionalText(input.fileMimeType),
+          fileDataUrl,
+        }),
+      };
+    }
+    case "EXTERNAL_LINK": {
+      const externalUrl = requireText(
+        input.externalUrl ?? input.resourceUrl,
+        "externalUrl",
+      );
+      const normalizedUrl = normalizeHttpUrl(externalUrl);
+      return {
+        resourceUrl: normalizedUrl,
+        resourceContent: normalizedUrl,
+      };
+    }
+  }
 }
 
 function normalizeStoredResourceType(value: string): ResourceType {
   return RESOURCE_TYPES.includes(value as ResourceType)
     ? (value as ResourceType)
     : "CONTENT";
+}
+
+function normalizeStoredPublishedResourceType(value: string) {
+  return PUBLISHED_RESOURCE_TYPES.includes(value as PublishedResourceType)
+    ? (value as PublishedResourceType)
+    : undefined;
 }
 
 function normalizeTags(value: CreateResourceRequest["tags"]) {
@@ -287,4 +398,58 @@ function parseStoredTags(value: string) {
   }
 
   return [];
+}
+
+function normalizeOptionalStoredText(value: string | null | undefined) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeHttpUrl(value: string) {
+  const parsed = new URL(value);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new InputError("externalUrl must start with http:// or https://");
+  }
+
+  return parsed.toString();
+}
+
+function validateFileUpload(
+  fileName: string,
+  fileDataUrl: string,
+  fileMimeType?: string | null,
+) {
+  const extension = fileName.split(".").pop()?.toLowerCase();
+  const allowedExtensions = new Set(["pdf", "zip", "docx"]);
+  if (!extension || !allowedExtensions.has(extension)) {
+    throw new InputError("file uploads must be PDF, ZIP, or DOCX files");
+  }
+
+  const normalizedMimeType = fileMimeType?.trim().toLowerCase();
+  const allowedMimeTypes = new Set([
+    "application/pdf",
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ]);
+
+  if (
+    normalizedMimeType &&
+    !allowedMimeTypes.has(normalizedMimeType) &&
+    !normalizedMimeType.startsWith("application/octet-stream")
+  ) {
+    throw new InputError("file uploads must be PDF, ZIP, or DOCX files");
+  }
+
+  if (!fileDataUrl.startsWith("data:")) {
+    throw new InputError("fileDataUrl must be a data URL");
+  }
+}
+
+function toDataUrl(mimeType: string, content: string) {
+  return `data:${mimeType},${encodeURIComponent(content)}`;
 }

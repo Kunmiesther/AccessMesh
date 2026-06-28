@@ -7,11 +7,11 @@ import {
   InputError,
   normalizeAddress,
   normalizeTxHash,
-  parsePositiveUsdcAmount,
 } from "@/lib/validation";
 import { ActivityType } from "@/services/activityService";
 import { verifySettlement } from "@/services/arcVerifier";
 import { LedgerStatus, logAccessDenied, logEvent } from "@/services/ledgerService";
+import { getResourcePaymentParticipants } from "@/services/resourceService";
 
 const INTENT_TTL_MS =
   Number(process.env.ACCESS_INTENT_TTL_SECONDS ?? 600) * 1000;
@@ -23,6 +23,10 @@ type AccessIntent = {
   payerWallet: Address;
   amountUSDC: number;
   recipientWallet: Address;
+  creatorWallet: Address;
+  treasuryWallet: Address;
+  creatorAmountUSDC: number;
+  treasuryAmountUSDC: number;
   expiresAt: string;
   createdAt: string;
 };
@@ -47,10 +51,7 @@ export async function createAccessPaymentIntent(params: {
   fallbackAmountUSDC?: string | number | null;
 }) {
   const payerWallet = normalizeAddress(params.payerWallet, "wallet");
-  const paymentFields = await resolvePaymentFields(params.resourceId, {
-    fallbackAmountUSDC: params.fallbackAmountUSDC,
-    fallbackRecipientWallet: params.fallbackRecipientWallet,
-  });
+  const paymentFields = await resolvePaymentFields(params.resourceId);
   const createdAt = new Date();
   const expiresAt = new Date(createdAt.getTime() + INTENT_TTL_MS);
   const accessId = await createIntentAccessId({
@@ -64,6 +65,10 @@ export async function createAccessPaymentIntent(params: {
     payerWallet,
     amountUSDC: paymentFields.amountUSDC,
     recipientWallet: paymentFields.recipientWallet,
+    creatorWallet: paymentFields.creatorWallet,
+    treasuryWallet: paymentFields.treasuryWallet,
+    creatorAmountUSDC: paymentFields.creatorAmountUSDC,
+    treasuryAmountUSDC: paymentFields.treasuryAmountUSDC,
     createdAt: createdAt.toISOString(),
     expiresAt: expiresAt.toISOString(),
   };
@@ -80,6 +85,10 @@ export async function createAccessPaymentIntent(params: {
     accessId,
     amountUSDC: paymentFields.amountUSDC,
     recipientWallet: paymentFields.recipientWallet,
+    creatorWallet: paymentFields.creatorWallet,
+    treasuryWallet: paymentFields.treasuryWallet,
+    creatorAmountUSDC: paymentFields.creatorAmountUSDC,
+    treasuryAmountUSDC: paymentFields.treasuryAmountUSDC,
     expiresAt: intent.expiresAt,
     payerWallet,
     resource: {
@@ -125,8 +134,12 @@ export async function unlockAccess(params: {
   const verification = await verifySettlement({
     txHash,
     payerWallet: intent.payerWallet,
-    providerWallet: intent.recipientWallet,
-    amountUSDC: intent.amountUSDC,
+    transfers: buildPaymentTransfers({
+      creatorWallet: intent.creatorWallet,
+      treasuryWallet: intent.treasuryWallet,
+      creatorAmountUSDC: intent.creatorAmountUSDC,
+      treasuryAmountUSDC: intent.treasuryAmountUSDC,
+    }),
   }).catch(async (error: unknown) => {
     await prisma.payment.update({
       where: { txHash },
@@ -240,10 +253,7 @@ async function resolveAccessIntent(accessId: string): Promise<AccessIntent> {
     throw new InputError("accessId was not found");
   }
 
-  const paymentFields = await resolvePaymentFields(accessLog.resourceId, {
-    fallbackAmountUSDC: fallback?.amountUSDC,
-    fallbackRecipientWallet: fallback?.recipientWallet,
-  });
+  const paymentFields = await resolvePaymentFields(accessLog.resourceId);
   const createdAt = accessLog.createdAt;
 
   return {
@@ -255,61 +265,33 @@ async function resolveAccessIntent(accessId: string): Promise<AccessIntent> {
     ),
     amountUSDC: paymentFields.amountUSDC,
     recipientWallet: paymentFields.recipientWallet,
+    creatorWallet: paymentFields.creatorWallet,
+    treasuryWallet: paymentFields.treasuryWallet,
+    creatorAmountUSDC: paymentFields.creatorAmountUSDC,
+    treasuryAmountUSDC: paymentFields.treasuryAmountUSDC,
     createdAt: createdAt.toISOString(),
     expiresAt: new Date(createdAt.getTime() + INTENT_TTL_MS).toISOString(),
   };
 }
 
-async function resolvePaymentFields(
-  resourceId: string,
-  fallback?: {
-    fallbackRecipientWallet?: string | Address | null;
-    fallbackAmountUSDC?: string | number | null;
-  },
-) {
-  const resource = await prisma.resource.findUnique({
-    where: { id: resourceId },
-  });
-
-  if (!resource || !resource.isActive) {
-    throw new InputError("resource not found or inactive");
-  }
-
-  const amountUSDC =
-    Number.isFinite(resource.priceUSDC) && resource.priceUSDC > 0
-      ? resource.priceUSDC
-      : parseFallbackAmount(fallback?.fallbackAmountUSDC);
-
-  const owner = await prisma.user
-    .findUnique({ where: { id: resource.ownerId } })
-    .catch(() => null);
-
-  const recipientWallet =
-    owner?.walletAddress && owner.walletAddress.length > 0
-      ? normalizeAddress(owner.walletAddress, "recipientWallet")
-      : parseFallbackRecipient(fallback?.fallbackRecipientWallet);
+async function resolvePaymentFields(resourceId: string) {
+  const {
+    resource,
+    creatorWallet,
+    treasuryWallet,
+    creatorAmountUSDC,
+    treasuryAmountUSDC,
+  } = await getResourcePaymentParticipants(resourceId);
 
   return {
     resource,
-    amountUSDC,
-    recipientWallet,
+    amountUSDC: resource.priceUSDC,
+    recipientWallet: creatorWallet,
+    creatorWallet,
+    treasuryWallet,
+    creatorAmountUSDC,
+    treasuryAmountUSDC,
   };
-}
-
-function parseFallbackAmount(value: string | number | null | undefined) {
-  if (value === undefined || value === null || value === "") {
-    throw new InputError("resource priceUSDC is missing");
-  }
-
-  return parsePositiveUsdcAmount(value);
-}
-
-function parseFallbackRecipient(value: string | Address | null | undefined) {
-  if (!value) {
-    throw new InputError("resource recipient wallet is missing");
-  }
-
-  return normalizeAddress(value, "recipientWallet");
 }
 
 async function reservePayment(params: {
@@ -572,4 +554,27 @@ function getErrorMessage(error: unknown) {
   }
 
   return "unknown verification error";
+}
+
+function buildPaymentTransfers(params: {
+  creatorWallet: Address;
+  treasuryWallet: Address;
+  creatorAmountUSDC: number;
+  treasuryAmountUSDC: number;
+}) {
+  const transfers = [
+    {
+      recipientWallet: params.creatorWallet,
+      amountUSDC: params.creatorAmountUSDC,
+    },
+  ];
+
+  if (params.treasuryAmountUSDC > 0) {
+    transfers.push({
+      recipientWallet: params.treasuryWallet,
+      amountUSDC: params.treasuryAmountUSDC,
+    });
+  }
+
+  return transfers;
 }

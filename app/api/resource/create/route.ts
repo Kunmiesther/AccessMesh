@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { jsonError } from "@/lib/http";
-import { InputError, normalizeOptionalAddress } from "@/lib/validation";
+import {
+  getWalletFromRequest,
+  InputError,
+  normalizeAddress,
+  normalizeOptionalAddress,
+} from "@/lib/validation";
 import { prisma } from "@/lib/prisma";
 import { createResource, listResources } from "@/services/resourceService";
 
@@ -48,7 +53,22 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const resource = await createResource(body);
+    const wallet = getWalletFromRequest(request);
+    const creatorWallet = wallet
+      ? normalizeAddress(wallet, "wallet")
+      : normalizeAddress(body.creatorWallet, "creatorWallet");
+
+    if (body.creatorWallet) {
+      const submittedWallet = normalizeAddress(body.creatorWallet, "creatorWallet");
+      if (submittedWallet !== creatorWallet) {
+        throw new InputError("creator wallet does not match authenticated wallet");
+      }
+    }
+
+    const resource = await createResource({
+      ...body,
+      creatorWallet,
+    });
 
     return NextResponse.json({
       ok: true,

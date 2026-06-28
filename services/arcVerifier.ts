@@ -40,14 +40,20 @@ export type SettlementVerificationResult = {
 export async function verifySettlement(params: {
   txHash: Hash;
   payerWallet: Address;
-  providerWallet: Address;
-  amountUSDC: number;
+  transfers: Array<{
+    recipientWallet: Address;
+    amountUSDC: number;
+  }>;
 }): Promise<SettlementVerificationResult> {
-  const expectedAmount = parseUnits(usdcAmountToString(params.amountUSDC), 6);
   const expectedFrom = getAddress(params.payerWallet);
-  const expectedTo = getAddress(params.providerWallet);
   const usdcAddress = getAddress(ArcTestnet.usdcAddress);
   const requiredConfirmations = getRequiredConfirmations();
+  const expectedTransfers = params.transfers
+    .filter((transfer) => transfer.amountUSDC > 0)
+    .map((transfer) => ({
+      to: getAddress(transfer.recipientWallet),
+      amount: parseUnits(usdcAmountToString(transfer.amountUSDC), 6),
+    }));
 
   const chainId = await arcPublicClient.getChainId();
   if (chainId !== ArcTestnet.chainId) {
@@ -89,7 +95,43 @@ export async function verifySettlement(params: {
     };
   }
 
-  const matchingTransfer = receipt.logs.find((log) => {
+  const matchingTransfers = expectedTransfers.filter((expectedTransfer) => {
+    return receipt.logs.some((log) => {
+      if (getAddress(log.address) !== usdcAddress) {
+        return false;
+      }
+
+      try {
+        const decoded = decodeEventLog({
+          abi: erc20TransferAbi,
+          data: log.data,
+          topics: log.topics,
+        });
+
+        if (decoded.eventName !== "Transfer") {
+          return false;
+        }
+
+        const from = getAddress(decoded.args.from);
+        const to = getAddress(decoded.args.to);
+        const value = decoded.args.value;
+
+        return from === expectedFrom && to === expectedTransfer.to && value === expectedTransfer.amount;
+      } catch {
+        return false;
+      }
+    });
+  });
+
+  if (matchingTransfers.length !== expectedTransfers.length) {
+    return failed(params.txHash, "matching Arc USDC transfer was not found", {
+      chainId,
+      blockNumber: receipt.blockNumber.toString(),
+      confirmations: confirmations.toString(),
+    });
+  }
+
+  const primaryLog = receipt.logs.find((log) => {
     if (getAddress(log.address) !== usdcAddress) {
       return false;
     }
@@ -107,31 +149,19 @@ export async function verifySettlement(params: {
 
       const from = getAddress(decoded.args.from);
       const to = getAddress(decoded.args.to);
-      const value = decoded.args.value;
-
-      return from === expectedFrom && to === expectedTo && value === expectedAmount;
+      return from === expectedFrom;
     } catch {
       return false;
     }
   });
 
-  if (!matchingTransfer) {
-    return failed(params.txHash, "matching Arc USDC transfer was not found", {
-      chainId,
-      blockNumber: receipt.blockNumber.toString(),
-      confirmations: confirmations.toString(),
-    });
-  }
-
-  const decoded = decodeEventLog({
-    abi: erc20TransferAbi,
-    data: matchingTransfer.data,
-    topics: matchingTransfer.topics,
-  });
-
-  if (decoded.eventName !== "Transfer") {
-    throw new InputError("unexpected decoded transfer event");
-  }
+  const decoded = primaryLog
+    ? decodeEventLog({
+        abi: erc20TransferAbi,
+        data: primaryLog.data,
+        topics: primaryLog.topics,
+      })
+    : null;
 
   return {
     status: "SETTLED",
@@ -142,10 +172,10 @@ export async function verifySettlement(params: {
     blockNumber: receipt.blockNumber.toString(),
     confirmations: confirmations.toString(),
     transfer: {
-      from: getAddress(decoded.args.from),
-      to: getAddress(decoded.args.to),
-      value: decoded.args.value.toString(),
-      expectedValue: expectedAmount.toString(),
+      from: getAddress(decoded?.args.from ?? expectedFrom),
+      to: getAddress(decoded?.args.to ?? expectedTransfers[0].to),
+      value: decoded?.args.value.toString() ?? expectedTransfers[0].amount.toString(),
+      expectedValue: expectedTransfers[0].amount.toString(),
       token: usdcAddress,
     },
   };

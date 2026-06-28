@@ -16,12 +16,19 @@ import {
   logPaymentConfirmed,
   logPaymentInitiated,
 } from "@/services/ledgerService";
-import { getResourceProviderWallet } from "@/services/resourceService";
+import {
+  getResourcePaymentParticipants,
+} from "@/services/resourceService";
 
 export async function initiatePayment(resourceId: string, wallet: string) {
   const payerWallet = normalizeAddress(wallet, "wallet");
-  const { resource, providerWallet } =
-    await getResourceProviderWallet(resourceId);
+  const {
+    resource,
+    creatorWallet,
+    treasuryWallet,
+    creatorAmountUSDC,
+    treasuryAmountUSDC,
+  } = await getResourcePaymentParticipants(resourceId);
 
   await prisma.user.upsert({
     where: { walletAddress: payerWallet },
@@ -55,7 +62,11 @@ export async function initiatePayment(resourceId: string, wallet: string) {
       priceUSDC: resource.priceUSDC,
     },
     payerWallet,
-    providerWallet,
+    providerWallet: creatorWallet,
+    creatorWallet,
+    treasuryWallet,
+    creatorAmountUSDC,
+    treasuryAmountUSDC,
     amount: resource.priceUSDC,
     currency: "USDC",
     chain: "Arc Testnet",
@@ -63,7 +74,7 @@ export async function initiatePayment(resourceId: string, wallet: string) {
     settledTxHash: existingSettlement?.txHash ?? null,
     payment: buildCircleSendRequirement({
       amountUSDC: resource.priceUSDC,
-      providerWallet,
+      providerWallet: creatorWallet,
     }),
   };
 }
@@ -75,14 +86,19 @@ export async function submitTxHash(
 ) {
   const txHash = normalizeTxHash(txHashInput);
   const payerWallet = normalizeAddress(wallet, "wallet");
-  const { resource, providerWallet } =
-    await getResourceProviderWallet(resourceId);
+  const {
+    resource,
+    creatorWallet,
+    treasuryWallet,
+    creatorAmountUSDC,
+    treasuryAmountUSDC,
+  } = await getResourcePaymentParticipants(resourceId);
 
   const payment = await createPendingPayment({
     txHash,
     resourceId,
     payerWallet,
-    providerWallet,
+    providerWallet: creatorWallet,
     amountUSDC: resource.priceUSDC,
   });
 
@@ -152,11 +168,22 @@ export async function verifyPaymentSettlement(txHashInput: string | Hash) {
     status: LedgerStatus.PaymentConfirming,
   });
 
+  const {
+    creatorWallet,
+    treasuryWallet,
+    creatorAmountUSDC,
+    treasuryAmountUSDC,
+  } = await getResourcePaymentParticipants(payment.resourceId);
+
   const result = await verifyArcSettlement({
     txHash: txHash as Hash,
     payerWallet: payment.payerWallet as Address,
-    providerWallet: payment.providerWallet as Address,
-    amountUSDC: payment.amountUSDC,
+    transfers: buildPaymentTransfers({
+      creatorWallet,
+      treasuryWallet,
+      creatorAmountUSDC,
+      treasuryAmountUSDC,
+    }),
   }).catch(async (error: unknown) => {
     const confirmingPayment = await prisma.payment.update({
       where: { txHash },
@@ -234,6 +261,29 @@ function getErrorMessage(error: unknown) {
   }
 
   return "unknown verification error";
+}
+
+function buildPaymentTransfers(params: {
+  creatorWallet: Address;
+  treasuryWallet: Address;
+  creatorAmountUSDC: number;
+  treasuryAmountUSDC: number;
+}) {
+  const transfers = [
+    {
+      recipientWallet: params.creatorWallet,
+      amountUSDC: params.creatorAmountUSDC,
+    },
+  ];
+
+  if (params.treasuryAmountUSDC > 0) {
+    transfers.push({
+      recipientWallet: params.treasuryWallet,
+      amountUSDC: params.treasuryAmountUSDC,
+    });
+  }
+
+  return transfers;
 }
 
 export async function finalizePayment(txHashInput: string) {

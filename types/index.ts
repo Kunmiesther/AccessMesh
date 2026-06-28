@@ -1,4 +1,5 @@
 export type ResourceType = "API" | "CONTENT" | "TOOL" | "DATASET";
+export type PublishedResourceType = "ARTICLE" | "FILE_UPLOAD" | "EXTERNAL_LINK";
 
 export type ActivityEventType =
   | "RESOURCE_PUBLISHED"
@@ -10,11 +11,15 @@ export type SortMode = "newest" | "price-asc" | "price-desc";
 export type ResourceMeta = {
   id: string;
   creatorWallet: string;
+  creatorDisplayName?: string | null;
   title: string;
   name: string;
   description: string;
   category: ResourceType;
   type: ResourceType;
+  resourceCategory?: string;
+  resourceType?: PublishedResourceType;
+  resourceContent?: string;
   priceUSDC: number;
   resourceUrl?: string;
   endpoint?: string;
@@ -45,6 +50,10 @@ export type PaymentIntent = {
   accessId: string;
   amountUSDC: number;
   recipientWallet: string;
+  creatorWallet: string;
+  treasuryWallet: string;
+  creatorAmountUSDC: number;
+  treasuryAmountUSDC: number;
   expiresAt: string;
   payerWallet: string;
   resource: ResourceMeta;
@@ -145,13 +154,18 @@ export type ResourceDetailResponse = {
 
 export type CreateResourceRequest = {
   creatorWallet: string;
+  creatorDisplayName?: string;
   title: string;
   description: string;
-  category: ResourceType;
+  category: string;
   priceUSDC: number | string;
-  resourceUrl?: string;
+  resourceType?: PublishedResourceType;
+  articleContent?: string;
   fileName?: string;
   fileDataUrl?: string;
+  fileMimeType?: string;
+  externalUrl?: string;
+  resourceUrl?: string;
   coverImage?: string;
   tags?: string[] | string;
 };

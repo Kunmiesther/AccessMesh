@@ -20,10 +20,14 @@ model Resource {
   id             String   @id @default(cuid())
   ownerId        String
   creatorWallet  String   @default("")
+  creatorDisplayName String?
   title          String   @default("")
   name           String
   category       String   @default("CONTENT")
   type           String   // API | CONTENT | TOOL | DATASET
+  resourceCategory String  @default("")
+  resourceType   String   @default("")
+  resourceContent String   @default("")
   description    String
   priceUSDC      Float
   resourceUrl    String   @default("")

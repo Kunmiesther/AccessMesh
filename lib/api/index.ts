@@ -161,9 +161,14 @@ export async function getResourceDetail(
 
 export async function postResource(
   body: CreateResourceRequest,
+  opts?: { wallet?: string },
 ): Promise<CreateResourceResponse> {
   return apiFetch<CreateResourceResponse>("/api/resource/create", {
     method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(opts?.wallet ? { "x-wallet-address": opts.wallet } : {}),
+    },
     body: JSON.stringify(body),
   });
 }
