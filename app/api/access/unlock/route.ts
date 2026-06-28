@@ -21,7 +21,35 @@ export async function POST(request: Request) {
         ? 402
         : 202;
 
-    return NextResponse.json(result, { status });
+    const responseBody = result.ok
+      ? {
+          ...result,
+          accessToken: undefined,
+          tokenType: undefined,
+        }
+      : result;
+    const response = NextResponse.json(responseBody, { status });
+
+    if (result.ok && result.accessToken) {
+      response.cookies.set({
+        name: "accessmesh_access",
+        value: result.accessToken,
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: Math.max(
+          60,
+          Math.floor(
+            (new Date(result.expiresAt ?? Date.now() + 3600_000).getTime() -
+              Date.now()) /
+              1000,
+          ),
+        ),
+      });
+    }
+
+    return response;
   } catch (error) {
     if (error instanceof InputError) {
       return jsonError(400, "ACCESS_UNLOCK_INVALID", error.message);

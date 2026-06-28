@@ -18,12 +18,7 @@ type Props = {
   walletAddress: string;
   smartAccount: ModularWalletSession["smartAccount"] | null;
   bundlerClient: ModularWalletSession["bundlerClient"] | null;
-  onUnlocked: (
-    accessToken: string,
-    resourceId: string,
-    txHash: string,
-    expiresAt?: string,
-  ) => void;
+  onUnlocked: (resource: PaymentIntent["resource"], txHash: string) => void;
 };
 
 type Step = "idle" | "paying" | "verifying" | "confirming" | "error";
@@ -72,13 +67,8 @@ export function PaymentIntentBox({
         },
       );
 
-      if (result.ok && result.accessToken && result.resourceId) {
-        onUnlocked(
-          result.accessToken,
-          result.resourceId,
-          result.txHash ?? hash,
-          result.expiresAt,
-        );
+      if (result.ok && result.resourceId) {
+        onUnlocked(intent.resource, result.txHash ?? hash);
         return;
       }
 

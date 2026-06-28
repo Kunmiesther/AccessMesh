@@ -1,10 +1,11 @@
 "use client";
+/* eslint-disable react-hooks/set-state-in-effect */
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Navbar } from "@/components/Navbar";
-import { getDashboard, getRecentActivity } from "@/lib/api";
-import { formatUSDC, shortAddress } from "@/lib/ui";
+import { getDashboard } from "@/lib/api";
+import { arcExplorerTxUrl, formatDate, formatUSDC, shortAddress } from "@/lib/ui";
 import { useWallet } from "@/lib/ui/WalletContext";
 import type {
   ActivityEventType,
@@ -37,14 +38,12 @@ const EMPTY_ANALYTICS: CreatorAnalytics = {
 export default function DashboardPage() {
   const { address, connected } = useWallet();
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
-  const [activity, setActivity] = useState<RecentActivityEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!connected || !address) {
       setDashboard(null);
-      setActivity([]);
       setLoading(false);
       setError(null);
       return;
@@ -55,27 +54,21 @@ export default function DashboardPage() {
     setLoading(true);
     setError(null);
 
-    Promise.all([getDashboard(address), getRecentActivity()])
-      .then(([dashboardRes, activityRes]) => {
-        if (cancelled) {
-          return;
+    getDashboard(address)
+      .then((dashboardRes) => {
+        if (!cancelled) {
+          setDashboard(dashboardRes);
         }
-
-        setDashboard(dashboardRes);
-        setActivity(activityRes.activity);
       })
       .catch((fetchError: unknown) => {
-        if (cancelled) {
-          return;
+        if (!cancelled) {
+          setDashboard(null);
+          setError(
+            fetchError instanceof Error
+              ? fetchError.message
+              : "Dashboard data could not be loaded.",
+          );
         }
-
-        setDashboard(null);
-        setActivity([]);
-        setError(
-          fetchError instanceof Error
-            ? fetchError.message
-            : "Dashboard data could not be loaded.",
-        );
       })
       .finally(() => {
         if (!cancelled) {
@@ -106,7 +99,7 @@ export default function DashboardPage() {
             Protocol analytics
           </h1>
           <p style={{ fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.7 }}>
-            Live protocol metrics and creator performance from stored AccessMesh data.
+            Live protocol metrics, creator performance, and access history from stored AccessMesh data.
           </p>
         </header>
 
@@ -127,46 +120,40 @@ export default function DashboardPage() {
           <section style={emptyStateStyle}>
             <p style={{ color: "var(--text-secondary)", lineHeight: 1.6 }}>{error}</p>
           </section>
-        ) : (
+        ) : dashboard ? (
           <>
             <section style={sectionStyle}>
-              <SectionHeader
-                eyebrow="Protocol stats"
-                title="Protocol-wide activity"
-              />
+              <SectionHeader eyebrow="Protocol stats" title="Protocol-wide activity" />
               <div style={statsGridStyle}>
                 <StatCard label="Total Resources" value={stats.totalResources} />
                 <StatCard label="Total Unlocks" value={stats.totalUnlocks} />
-                <StatCard
-                  label="Total USDC Volume"
-                  value={formatUSDC(stats.totalUSDCVolume)}
-                />
+                <StatCard label="Total Volume" value={formatUSDC(stats.totalUSDCVolume)} />
                 <StatCard label="Total Creators" value={stats.totalCreators} />
               </div>
             </section>
 
             <section style={sectionStyle}>
-              <SectionHeader
-                eyebrow="Creator analytics"
-                title="Performance for the connected wallet"
-              />
+              <SectionHeader eyebrow="Creator analytics" title="Performance for the connected wallet" />
               <div style={creatorGridStyle}>
                 <StatCard
-                  label="Revenue Earned"
+                  label="Creator Revenue"
                   value={formatUSDC(analytics.revenueEarned)}
                 />
                 <StatCard
-                  label="Resources Published"
+                  label="Created Resources"
                   value={analytics.resourcesPublished}
                 />
-                <StatCard label="Total Unlocks" value={analytics.totalUnlocks} />
+                <StatCard label="Unlock Count" value={analytics.totalUnlocks} />
                 <div style={topResourceStyle}>
-                  <p style={metricLabelStyle}>Top Performing Resource</p>
+                  <p style={metricLabelStyle}>Top Resource</p>
                   {analytics.topResource ? (
                     <>
-                      <h2 style={topResourceTitleStyle}>
+                      <Link
+                        href={`/resource/${analytics.topResource.id}`}
+                        style={topResourceLinkStyle}
+                      >
                         {analytics.topResource.title}
-                      </h2>
+                      </Link>
                       <div style={topResourceMetaGridStyle}>
                         <div>
                           <p style={metaLabelStyle}>Revenue</p>
@@ -190,36 +177,114 @@ export default function DashboardPage() {
             </section>
 
             <section style={sectionStyle}>
-              <SectionHeader eyebrow="x402 analytics" title="Protected access conversion" />
-              <div style={statsGridStyle}>
-                <StatCard
-                  label="Protected Requests"
-                  value={analytics.x402.protectedRequests}
-                />
-                <StatCard
-                  label="Successful Accesses"
-                  value={analytics.x402.successfulAccesses}
-                />
-                <StatCard
-                  label="Failed Accesses"
-                  value={analytics.x402.failedAccesses}
-                />
-                <StatCard label="Conversion Rate" value={conversionRate} />
-              </div>
+              <SectionHeader eyebrow="Purchased resources" title="Newest purchases first" />
+              {dashboard.purchasedResources.length > 0 ? (
+                <div style={listStyle}>
+                  {dashboard.purchasedResources.map((purchase) => (
+                    <PurchaseRow key={purchase.id} purchase={purchase} />
+                  ))}
+                </div>
+              ) : (
+                <section style={emptyStateStyle}>
+                  <p style={emptyFeedTextStyle}>No purchases recorded yet.</p>
+                </section>
+              )}
             </section>
 
             <section style={sectionStyle}>
-              <SectionHeader eyebrow="Activity feed" title="Newest events first" />
-              <div style={feedStyle}>
-                {activity.length > 0 ? (
-                  activity.map((entry) => <ActivityRow key={entry.id} entry={entry} />)
-                ) : (
+              <SectionHeader eyebrow="Created resources" title="Newest publications first" />
+              {dashboard.createdResources.length > 0 ? (
+                <div style={resourceGridStyle}>
+                  {dashboard.createdResources.map((resource) => (
+                    <Link key={resource.id} href={`/resource/${resource.id}`} style={resourceCardStyle}>
+                      <div style={resourceCardCoverStyle}>
+                        <span style={resourceTypeStyle}>
+                          {resource.resourceCategory ?? resource.category}
+                        </span>
+                        <span style={resourcePriceStyle}>{formatUSDC(resource.priceUSDC)}</span>
+                      </div>
+                      <div style={resourceCardBodyStyle}>
+                        <h3 style={resourceCardTitleStyle}>{resource.title}</h3>
+                        <p style={resourceCardDescriptionStyle}>{resource.description}</p>
+                        <div style={resourceCardMetaStyle}>
+                          <MetaBlock label="Revenue" value={formatUSDC(resource.revenue)} />
+                          <MetaBlock label="Unlocks" value={resource.unlockCount} />
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <section style={emptyStateStyle}>
+                  <p style={emptyFeedTextStyle}>No created resources yet.</p>
+                </section>
+              )}
+            </section>
+
+            <section style={sectionStyle}>
+              <SectionHeader eyebrow="Payment history" title="Settled USDC transfers" />
+              {dashboard.paymentHistory.length > 0 ? (
+                <div style={listStyle}>
+                  {dashboard.paymentHistory.map((payment) => (
+                    <PurchaseRow key={payment.id} purchase={payment} showResourceLink={false} />
+                  ))}
+                </div>
+              ) : (
+                <section style={emptyStateStyle}>
+                  <p style={emptyFeedTextStyle}>No payment history yet.</p>
+                </section>
+              )}
+            </section>
+
+            <section style={sectionStyle}>
+              <SectionHeader eyebrow="Protocol activity" title="Newest events first" />
+              {dashboard.protocolActivity.length > 0 ? (
+                <div style={feedStyle}>
+                  {dashboard.protocolActivity.map((entry) => (
+                    <ActivityRow key={entry.id} entry={entry} />
+                  ))}
+                </div>
+              ) : (
+                <section style={emptyStateStyle}>
                   <p style={emptyFeedTextStyle}>No activity recorded yet.</p>
-                )}
+                </section>
+              )}
+            </section>
+
+            <section style={sectionStyle}>
+              <div style={tripleGridStyle}>
+                <ActivityPanel
+                  eyebrow="Recent unlocks"
+                  title="Newest unlocks first"
+                  entries={dashboard.recentUnlocks}
+                />
+                <ActivityPanel
+                  eyebrow="Recent publications"
+                  title="Newest publications first"
+                  entries={dashboard.recentPublications}
+                />
+                <section style={x402PanelStyle}>
+                  <SectionHeader eyebrow="x402 analytics" title="Protected access conversion" />
+                  <div style={statsGridStyle}>
+                    <StatCard
+                      label="Protected Requests"
+                      value={analytics.x402.protectedRequests}
+                    />
+                    <StatCard
+                      label="Successful Accesses"
+                      value={analytics.x402.successfulAccesses}
+                    />
+                    <StatCard
+                      label="Failed Accesses"
+                      value={analytics.x402.failedAccesses}
+                    />
+                    <StatCard label="Conversion Rate" value={conversionRate} />
+                  </div>
+                </section>
               </div>
             </section>
           </>
-        )}
+        ) : null}
       </main>
     </div>
   );
@@ -251,6 +316,69 @@ function StatCard({ label, value }: { label: string; value: number | string }) {
   );
 }
 
+function MetaBlock({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div>
+      <p style={metaLabelStyle}>{label}</p>
+      <p style={metaValueStyle}>{value}</p>
+    </div>
+  );
+}
+
+function PurchaseRow({
+  purchase,
+  showResourceLink = true,
+}: {
+  purchase: { id: string; resourceId: string; resourceTitle: string; creatorWallet: string; amountUSDC: number; txHash: string; timestamp: string };
+  showResourceLink?: boolean;
+}) {
+  return (
+    <div style={purchaseRowStyle}>
+      <div style={{ minWidth: 0 }}>
+        <div style={purchaseTitleRowStyle}>
+          <Link href={`/resource/${purchase.resourceId}`} style={purchaseTitleStyle}>
+            {purchase.resourceTitle}
+          </Link>
+          {showResourceLink && (
+            <Link href={`/creator/${purchase.creatorWallet}`} style={creatorLinkStyle}>
+              {shortAddress(purchase.creatorWallet)}
+            </Link>
+          )}
+        </div>
+        <p style={purchaseMetaStyle}>
+          {formatDate(purchase.timestamp)} · {formatUSDC(purchase.amountUSDC)}
+        </p>
+      </div>
+      <a href={arcExplorerTxUrl(purchase.txHash)} target="_blank" rel="noreferrer" style={txLinkStyle}>
+        {purchase.txHash}
+      </a>
+    </div>
+  );
+}
+
+function ActivityPanel({
+  eyebrow,
+  title,
+  entries,
+}: {
+  eyebrow: string;
+  title: string;
+  entries: RecentActivityEntry[];
+}) {
+  return (
+    <section style={x402PanelStyle}>
+      <SectionHeader eyebrow={eyebrow} title={title} />
+      <div style={feedStyle}>
+        {entries.length > 0 ? (
+          entries.map((entry) => <ActivityRow key={entry.id} entry={entry} />)
+        ) : (
+          <p style={emptyFeedTextStyle}>No activity recorded yet.</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function ActivityRow({ entry }: { entry: RecentActivityEntry }) {
   const activityMeta = activityMetaMap[entry.type];
 
@@ -260,18 +388,22 @@ function ActivityRow({ entry }: { entry: RecentActivityEntry }) {
         <p style={activityTypeStyle}>{activityMeta.label}</p>
         <p style={activityTextStyle}>
           <span style={walletStyle}>{shortAddress(entry.wallet)}</span>{" "}
-          {activityMeta.verb} "{entry.resourceTitle || entry.resourceName}"
+          {`${activityMeta.verb} "${entry.resourceTitle || entry.resourceName}"`}
         </p>
       </div>
-      <span style={timestampStyle}>{new Date(entry.createdAt).toLocaleDateString()}</span>
+      <div style={{ textAlign: "right" }}>
+        {entry.txHash ? (
+          <a href={arcExplorerTxUrl(entry.txHash)} target="_blank" rel="noreferrer" style={txLinkStyle}>
+            {shortAddress(entry.txHash)}
+          </a>
+        ) : null}
+        <span style={timestampStyle}>{new Date(entry.createdAt).toLocaleDateString()}</span>
+      </div>
     </div>
   );
 }
 
-const activityMetaMap: Record<
-  ActivityEventType,
-  { label: string; verb: string }
-> = {
+const activityMetaMap: Record<ActivityEventType, { label: string; verb: string }> = {
   RESOURCE_PUBLISHED: {
     label: "Resource Published",
     verb: "published",
@@ -345,12 +477,14 @@ const topResourceStyle = {
   minWidth: 0,
 } satisfies CSSProperties;
 
-const topResourceTitleStyle = {
+const topResourceLinkStyle = {
+  display: "inline-block",
   fontSize: 18,
   lineHeight: 1.35,
   fontWeight: 600,
   color: "var(--text-primary)",
   marginBottom: 16,
+  textDecoration: "none",
   wordBreak: "break-word",
 } satisfies CSSProperties;
 
@@ -374,6 +508,61 @@ const metaValueStyle = {
   fontSize: 14,
   color: "var(--text-secondary)",
   wordBreak: "break-word",
+} satisfies CSSProperties;
+
+const listStyle = {
+  display: "grid",
+  gap: 12,
+} satisfies CSSProperties;
+
+const purchaseRowStyle = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
+  gap: 16,
+  alignItems: "center",
+  padding: "14px 18px",
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+} satisfies CSSProperties;
+
+const purchaseTitleRowStyle = {
+  display: "flex",
+  gap: 12,
+  alignItems: "center",
+  flexWrap: "wrap",
+  marginBottom: 5,
+} satisfies CSSProperties;
+
+const purchaseTitleStyle = {
+  fontSize: 14,
+  color: "var(--text-primary)",
+  textDecoration: "none",
+  fontWeight: 600,
+  wordBreak: "break-word",
+} satisfies CSSProperties;
+
+const creatorLinkStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 12,
+  color: "var(--accent)",
+  textDecoration: "none",
+  wordBreak: "break-word",
+} satisfies CSSProperties;
+
+const purchaseMetaStyle = {
+  fontSize: 12,
+  color: "var(--text-secondary)",
+  lineHeight: 1.5,
+} satisfies CSSProperties;
+
+const txLinkStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 11,
+  color: "var(--accent)",
+  textDecoration: "none",
+  wordBreak: "break-all",
+  lineHeight: 1.5,
 } satisfies CSSProperties;
 
 const feedStyle = {
@@ -419,13 +608,94 @@ const timestampStyle = {
   whiteSpace: "nowrap",
 } satisfies CSSProperties;
 
-const emptyStateStyle = {
-  display: "flex",
-  flexDirection: "column" as const,
+const resourceGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
   gap: 16,
+} satisfies CSSProperties;
+
+const resourceCardStyle = {
+  display: "block",
   background: "var(--surface)",
   border: "1px solid var(--border)",
-  borderRadius: 8,
+  borderRadius: 14,
+  color: "inherit",
+  textDecoration: "none",
+  overflow: "hidden",
+} satisfies CSSProperties;
+
+const resourceCardCoverStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  alignItems: "start",
+  padding: 16,
+  minHeight: 120,
+  background:
+    "linear-gradient(135deg, rgba(0,194,168,0.18), rgba(255,255,255,0.02))",
+  borderBottom: "1px solid var(--border-subtle)",
+} satisfies CSSProperties;
+
+const resourceCardBodyStyle = {
+  padding: 16,
+} satisfies CSSProperties;
+
+const resourceCardTitleStyle = {
+  fontSize: 18,
+  lineHeight: 1.3,
+  color: "var(--text-primary)",
+  marginBottom: 8,
+} satisfies CSSProperties;
+
+const resourceCardDescriptionStyle = {
+  fontSize: 13,
+  color: "var(--text-secondary)",
+  lineHeight: 1.6,
+  marginBottom: 16,
+  display: "-webkit-box",
+  WebkitLineClamp: 3,
+  WebkitBoxOrient: "vertical",
+  overflow: "hidden",
+} satisfies CSSProperties;
+
+const resourceCardMetaStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 12,
+  borderTop: "1px solid var(--border-subtle)",
+  paddingTop: 14,
+} satisfies CSSProperties;
+
+const resourceTypeStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 10,
+  color: "var(--accent)",
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  marginBottom: 8,
+} satisfies CSSProperties;
+
+const resourcePriceStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 12,
+  color: "var(--text-primary)",
+  whiteSpace: "nowrap",
+} satisfies CSSProperties;
+
+const tripleGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+  gap: 16,
+} satisfies CSSProperties;
+
+const x402PanelStyle = {
+  minWidth: 0,
+} satisfies CSSProperties;
+
+const emptyStateStyle = {
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 12,
   padding: 24,
 } satisfies CSSProperties;
 
@@ -436,9 +706,6 @@ const emptyFeedTextStyle = {
 } satisfies CSSProperties;
 
 const primaryButtonStyle = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
   background: "var(--accent)",
   color: "#000",
   border: "1px solid var(--accent)",
@@ -447,5 +714,4 @@ const primaryButtonStyle = {
   textDecoration: "none",
   fontSize: 13,
   fontWeight: 600,
-  width: "fit-content",
 } satisfies CSSProperties;

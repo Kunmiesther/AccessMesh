@@ -1,7 +1,19 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeAddress } from "@/lib/validation";
+import {
+  ActivityType,
+  listRecentActivity,
+  listRecentActivityByType,
+} from "@/services/activityService";
 import { getX402Analytics } from "@/services/x402AccessService";
-import type { CreatedResourceSummary, CreatorAnalytics, ProtocolStats } from "@/types";
+import type {
+  CreatedResourceSummary,
+  CreatorAnalytics,
+  CreatorProfile,
+  ProtocolStats,
+  RecentActivityEntry,
+  ResourceType,
+} from "@/types";
 
 const CREATOR_REVENUE_SHARE = 0.95;
 
@@ -129,6 +141,125 @@ export async function getCreatorAnalytics(
   };
 }
 
+export async function getRecentProtocolActivity(limit = 12) {
+  return mapActivityEntries(await listRecentActivity(limit));
+}
+
+export async function getRecentUnlocks(limit = 8): Promise<RecentActivityEntry[]> {
+  return mapActivityEntries(
+    await listRecentActivityByType(ActivityType.ResourceUnlocked, limit),
+  );
+}
+
+export async function getRecentPublications(
+  limit = 8,
+): Promise<RecentActivityEntry[]> {
+  return mapActivityEntries(
+    await listRecentActivityByType(ActivityType.ResourcePublished, limit),
+  );
+}
+
+export async function getCreatorProfile(wallet: string): Promise<CreatorProfile> {
+  const creatorWallet = normalizeAddress(wallet, "wallet");
+  const [user, resources, settledPayments] = await Promise.all([
+    prisma.user.findUnique({
+      where: { walletAddress: creatorWallet },
+      select: { createdAt: true, walletAddress: true },
+    }),
+    prisma.resource.findMany({
+      where: { creatorWallet, isActive: true },
+      orderBy: { createdAt: "desc" },
+      include: { purchases: true },
+    }),
+    prisma.payment.findMany({
+      where: {
+        providerWallet: creatorWallet,
+        status: "SETTLED",
+      },
+      select: {
+        resourceId: true,
+        payerWallet: true,
+        amountUSDC: true,
+      },
+    }),
+  ]);
+
+  const paymentResourceCounts = new Map<
+    string,
+    { revenue: number; wallets: Set<string> }
+  >();
+
+  for (const payment of settledPayments) {
+    const existing = paymentResourceCounts.get(payment.resourceId) ?? {
+      revenue: 0,
+      wallets: new Set<string>(),
+    };
+    existing.revenue += payment.amountUSDC;
+    existing.wallets.add(payment.payerWallet);
+    paymentResourceCounts.set(payment.resourceId, existing);
+  }
+
+  const resourcesWithRevenue = resources.map((resource) => {
+    const settledFromPurchases = resource.purchases.reduce(
+      (sum, purchase) => sum + purchase.amountUSDC,
+      0,
+    );
+    const fallbackSettlement = paymentResourceCounts.get(resource.id);
+    const revenue =
+      resource.purchases.length > 0
+        ? settledFromPurchases * CREATOR_REVENUE_SHARE
+        : (fallbackSettlement?.revenue ?? 0) * CREATOR_REVENUE_SHARE;
+    const unlockCount =
+      resource.purchases.length > 0
+        ? resource.purchases.length
+        : fallbackSettlement?.wallets.size ?? resource.unlockCount;
+
+    return {
+      id: resource.id,
+      creatorWallet: resource.creatorWallet,
+      creatorDisplayName: resource.creatorDisplayName,
+      title: resource.title || resource.name,
+      name: resource.name,
+      description: resource.description,
+      category: normalizeResourceType(resource.category) as ResourceType,
+      type: normalizeResourceType(resource.type) as ResourceType,
+      priceUSDC: resource.priceUSDC,
+      resourceUrl: resource.resourceUrl || resource.endpoint,
+      endpoint: resource.endpoint,
+      coverImage: resource.coverImage,
+      tags: parseStoredTags(resource.tags),
+      unlockCount,
+      isActive: resource.isActive,
+      createdAt: resource.createdAt.toISOString(),
+      revenue,
+    };
+  });
+
+  const topResource = [...resourcesWithRevenue].sort(
+    (a, b) => b.revenue - a.revenue || b.unlockCount - a.unlockCount,
+  )[0];
+
+  const revenueEarned = resourcesWithRevenue.reduce(
+    (sum, resource) => sum + resource.revenue,
+    0,
+  );
+  const totalUnlocks = resourcesWithRevenue.reduce(
+    (sum, resource) => sum + resource.unlockCount,
+    0,
+  );
+
+  return {
+    wallet: creatorWallet,
+    displayName: resolveCreatorDisplayName(resources),
+    joinDate: (user?.createdAt ?? resources[0]?.createdAt ?? new Date()).toISOString(),
+    resourcesPublished: resources.length,
+    revenueEarned,
+    unlockCount: totalUnlocks,
+    topResource: topResource ?? null,
+    resources: resourcesWithRevenue,
+  };
+}
+
 export async function getCreatedResourceSummaries(
   wallet: string,
 ): Promise<CreatedResourceSummary[]> {
@@ -186,4 +317,61 @@ function parseStoredTags(value: string) {
   }
 
   return [];
+}
+
+function resolveCreatorDisplayName(
+  resources: Array<{ creatorDisplayName: string | null }>,
+) {
+  const firstDisplayName = resources.find((resource) =>
+    resource.creatorDisplayName?.trim().length,
+  )?.creatorDisplayName;
+
+  return normalizeOptionalStoredText(firstDisplayName) ?? "Creator";
+}
+
+function normalizeOptionalStoredText(value: string | null | undefined) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function mapActivityEntries(
+  entries: Array<{
+    id: string;
+    type: string;
+    wallet: string;
+    resourceId: string;
+    title: string;
+    txHash: string | null;
+    createdAt: Date;
+    resource: { type: string; category: string; title: string; name: string };
+  }>,
+): RecentActivityEntry[] {
+  return entries.map((entry) => ({
+    id: entry.id,
+    type: normalizeActivityType(entry.type),
+    wallet: entry.wallet,
+    payerWallet: entry.wallet,
+    resourceId: entry.resourceId,
+    resourceTitle: entry.title || entry.resource.title || entry.resource.name,
+    resourceName: entry.resource.title || entry.resource.name,
+    resourceType: normalizeResourceType(entry.resource.type || entry.resource.category),
+    txHash: entry.txHash,
+    createdAt: entry.createdAt.toISOString(),
+  }));
+}
+
+function normalizeActivityType(value: string) {
+  if (
+    value === "RESOURCE_PUBLISHED" ||
+    value === "RESOURCE_UNLOCKED" ||
+    value === "PROTECTED_RESOURCE_ACCESSED"
+  ) {
+    return value;
+  }
+
+  return "RESOURCE_UNLOCKED";
 }

@@ -34,3 +34,15 @@ export async function listRecentActivity(limit = 12) {
     take: limit,
   });
 }
+
+export async function listRecentActivityByType(
+  type: ActivityTypeValue,
+  limit = 12,
+) {
+  return prisma.activityEvent.findMany({
+    where: { type },
+    include: { resource: true },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+}

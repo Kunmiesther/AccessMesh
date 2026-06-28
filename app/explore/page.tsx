@@ -198,8 +198,8 @@ function ResourceCard({ resource }: { resource: ResourceMeta }) {
   const coverImageUrl = resource.coverImage ? encodeURI(resource.coverImage) : "";
 
   return (
-    <Link href={`/resource/${resource.id}`} style={cardStyle}>
-      <div style={coverWrapStyle}>
+    <article style={cardStyle}>
+      <Link href={`/resource/${resource.id}`} style={coverLinkStyle}>
         <div
           style={{
             ...coverStyle,
@@ -210,7 +210,7 @@ function ResourceCard({ resource }: { resource: ResourceMeta }) {
         >
           <span style={coverTagStyle}>{resourceCategory}</span>
         </div>
-      </div>
+      </Link>
 
       <div style={cardBodyStyle}>
         <div style={topRowStyle}>
@@ -218,7 +218,9 @@ function ResourceCard({ resource }: { resource: ResourceMeta }) {
           <span style={priceStyle}>{formatUSDC(resource.priceUSDC)}</span>
         </div>
 
-        <h2 style={titleCardStyle}>{resource.title || resource.name}</h2>
+        <Link href={`/resource/${resource.id}`} style={titleLinkStyle}>
+          {resource.title || resource.name}
+        </Link>
         <p style={descriptionStyle}>{resource.description}</p>
 
         <div style={footerGridStyle}>
@@ -226,11 +228,15 @@ function ResourceCard({ resource }: { resource: ResourceMeta }) {
             <p style={metaLabelStyle}>Creator</p>
             {creatorDisplay ? (
               <>
-                <p style={creatorNameStyle}>{creatorDisplay}</p>
+                <Link href={`/creator/${resource.creatorWallet}`} style={creatorLinkStyle}>
+                  {creatorDisplay}
+                </Link>
                 <p style={creatorWalletStyle}>{creatorWallet}</p>
               </>
             ) : (
-              <p style={creatorWalletStyle}>{creatorWallet}</p>
+              <Link href={`/creator/${resource.creatorWallet}`} style={creatorLinkStyle}>
+                {creatorWallet}
+              </Link>
             )}
           </div>
           <div style={{ textAlign: "right" }}>
@@ -238,8 +244,14 @@ function ResourceCard({ resource }: { resource: ResourceMeta }) {
             <p style={metaValueStyle}>{resource.unlockCount}</p>
           </div>
         </div>
+
+        <div style={cardActionRowStyle}>
+          <Link href={`/resource/${resource.id}`} style={cardActionButtonStyle}>
+            View resource
+          </Link>
+        </div>
       </div>
-    </Link>
+    </article>
   );
 }
 
@@ -342,10 +354,15 @@ const cardStyle = {
   border: "1px solid var(--border)",
   borderRadius: 14,
   color: "inherit",
-  textDecoration: "none",
   overflow: "hidden",
   minHeight: 360,
   transition: "transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease",
+} satisfies CSSProperties;
+
+const coverLinkStyle = {
+  display: "block",
+  color: "inherit",
+  textDecoration: "none",
 } satisfies CSSProperties;
 
 const coverWrapStyle = {
@@ -402,12 +419,14 @@ const priceStyle = {
   whiteSpace: "nowrap",
 } satisfies CSSProperties;
 
-const titleCardStyle = {
+const titleLinkStyle = {
+  display: "inline-block",
   fontSize: 18,
   lineHeight: 1.3,
   color: "var(--text-primary)",
   marginBottom: 10,
   minHeight: 48,
+  textDecoration: "none",
 } satisfies CSSProperties;
 
 const descriptionStyle = {
@@ -444,12 +463,13 @@ const metaLabelStyle = {
   marginBottom: 5,
 } satisfies CSSProperties;
 
-const creatorNameStyle = {
+const creatorLinkStyle = {
   fontFamily: "var(--font-mono)",
   fontSize: 13,
-  color: "var(--text-primary)",
+  color: "var(--accent)",
   lineHeight: 1.5,
   overflowWrap: "anywhere",
+  textDecoration: "none",
 } satisfies CSSProperties;
 
 const creatorWalletStyle = {
@@ -464,6 +484,26 @@ const metaValueStyle = {
   fontFamily: "var(--font-mono)",
   fontSize: 12,
   color: "var(--text-secondary)",
+} satisfies CSSProperties;
+
+const cardActionRowStyle = {
+  display: "flex",
+  gap: 10,
+  marginTop: 16,
+} satisfies CSSProperties;
+
+const cardActionButtonStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "transparent",
+  color: "var(--text-secondary)",
+  border: "1px solid var(--border)",
+  borderRadius: 4,
+  padding: "8px 12px",
+  textDecoration: "none",
+  fontSize: 12,
+  fontWeight: 600,
 } satisfies CSSProperties;
 
 const statCardStyle = {

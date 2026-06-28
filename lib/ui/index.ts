@@ -1,4 +1,5 @@
 import { type ClassValue, clsx } from "clsx";
+import { ArcTestnet } from "@circle-fin/app-kit/chains";
 import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) {
@@ -30,4 +31,16 @@ export function formatDate(iso: string): string {
 // Status label normalisation
 export function normaliseStatus(raw: string): string {
   return raw.replace(/_/g, " ").toLowerCase();
+}
+
+export function arcExplorerTxUrl(txHash: string): string {
+  return `${normalizeExplorerBase(ArcTestnet.explorerUrl)}/tx/${txHash}`;
+}
+
+export function arcExplorerAddressUrl(address: string): string {
+  return `${normalizeExplorerBase(ArcTestnet.explorerUrl)}/address/${address}`;
+}
+
+function normalizeExplorerBase(url: string) {
+  return url.replace(/\/+$/, "");
 }

@@ -1,6 +1,8 @@
 "use client";
+/* eslint-disable react-hooks/set-state-in-effect */
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Navbar } from "@/components/Navbar";
 import { AccessCard } from "@/components/AccessCard";
@@ -8,7 +10,7 @@ import { PaymentIntentBox } from "@/components/PaymentIntentBox";
 import { UnlockStatusTracker } from "@/components/UnlockStatusTracker";
 import { useWallet } from "@/lib/ui/WalletContext";
 import { getAccessIntent } from "@/lib/api";
-import type { PaymentIntent } from "@/types";
+import type { PaymentIntent, ResourceMeta } from "@/types";
 
 type PageState =
   | { phase: "no-wallet" }
@@ -17,10 +19,8 @@ type PageState =
   | { phase: "ready"; intent: PaymentIntent }
   | {
       phase: "unlocked";
-      accessToken: string;
-      resourceId: string;
+      resource: ResourceMeta;
       txHash: string;
-      expiresAt?: string;
     }
   | { phase: "error"; message: string };
 
@@ -62,13 +62,8 @@ export default function AccessPage() {
     }
   }
 
-  function handleUnlocked(
-    accessToken: string,
-    resourceId: string,
-    txHash: string,
-    expiresAt?: string,
-  ) {
-    setState({ phase: "unlocked", accessToken, resourceId, txHash, expiresAt });
+  function handleUnlocked(resource: ResourceMeta, txHash: string) {
+    setState({ phase: "unlocked", resource, txHash });
   }
 
   return (
@@ -125,14 +120,9 @@ export default function AccessPage() {
             gap: 6,
           }}
         >
-          <a
-            href="/"
-            style={{ color: "var(--text-muted)", textDecoration: "none" }}
-            onMouseOver={(e) => (e.currentTarget.style.color = "var(--text-secondary)")}
-            onMouseOut={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
-          >
+          <Link href="/" style={{ color: "var(--text-muted)", textDecoration: "none" }}>
             AccessMesh
-          </a>
+          </Link>
           <span>/</span>
           <span>access</span>
           <span>/</span>
@@ -304,10 +294,8 @@ export default function AccessPage() {
         {/* Unlocked */}
         {state.phase === "unlocked" && (
           <UnlockStatusTracker
-            accessToken={state.accessToken}
-            resourceId={state.resourceId}
+            resource={state.resource}
             txHash={state.txHash}
-            expiresAt={state.expiresAt}
           />
         )}
       </main>

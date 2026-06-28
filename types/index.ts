@@ -74,8 +74,6 @@ export type UnlockRequest = {
 export type UnlockResponse = {
   ok: boolean;
   access: "UNLOCKED" | "LOCKED";
-  accessToken?: string;
-  tokenType?: string;
   expiresAt?: string;
   resourceId?: string;
   txHash?: string;
@@ -187,6 +185,46 @@ export type ProtocolStatsResponse = {
   stats: ProtocolStats;
 };
 
+export type X402Accept = {
+  scheme: string;
+  price: string;
+  network: string;
+  payTo: string;
+};
+
+export type X402PaymentRequired = {
+  x402Version: number;
+  accepts: X402Accept[];
+  description: string;
+  mimeType: string;
+  resource: string;
+  unlockUrl: string;
+};
+
+export type X402AccessRequired = {
+  resourceId: string;
+  wallet: string | null;
+  unlockUrl: string;
+};
+
+export type ProtectedResourceResponse =
+  | {
+      ok: true;
+      resource: ResourceDetail;
+    }
+  | {
+      ok: false;
+      error: {
+        code: string;
+        message: string;
+        details?: Record<string, unknown>;
+      };
+      resource: ResourceDetail;
+      accepts: X402Accept[];
+      x402: X402PaymentRequired;
+      accessRequired: X402AccessRequired;
+    };
+
 export type RecentActivityEntry = {
   id: string;
   type: ActivityEventType;
@@ -227,6 +265,22 @@ export type CreatedResourceSummary = ResourceMeta & {
   revenue: number;
 };
 
+export type CreatorProfile = {
+  wallet: string;
+  displayName: string;
+  joinDate: string;
+  resourcesPublished: number;
+  revenueEarned: number;
+  unlockCount: number;
+  topResource: CreatedResourceSummary | null;
+  resources: CreatedResourceSummary[];
+};
+
+export type CreatorProfileResponse = {
+  ok: boolean;
+  creator: CreatorProfile;
+};
+
 export type DashboardResponse = {
   ok: boolean;
   stats?: ProtocolStats;
@@ -234,6 +288,9 @@ export type DashboardResponse = {
   purchasedResources: PurchaseProof[];
   createdResources: CreatedResourceSummary[];
   paymentHistory: PurchaseProof[];
+  protocolActivity: RecentActivityEntry[];
+  recentUnlocks: RecentActivityEntry[];
+  recentPublications: RecentActivityEntry[];
 };
 
 export type UnlockInitiateResponse = {

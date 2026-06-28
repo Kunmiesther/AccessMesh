@@ -1,5 +1,6 @@
 import type {
   AccessIntentResponse,
+  ProtectedResourceResponse,
   DashboardResponse,
   LedgerResponse,
   PaymentInitiateRequest,
@@ -157,6 +158,31 @@ export async function getResourceDetail(
         }
       : undefined,
   );
+}
+
+export async function getProtectedResource(
+  resourceId: string,
+  wallet?: string | null,
+): Promise<{ status: number; data: ProtectedResourceResponse }> {
+  const params = new URLSearchParams();
+  if (wallet) params.set("wallet", wallet);
+  const query = params.toString();
+
+  const res = await fetch(
+    `/api/resources/${resourceId}${query ? `?${query}` : ""}`,
+    {
+      headers: {
+        "Content-Type": "application/json",
+        ...(wallet ? { "x-wallet-address": wallet } : {}),
+      },
+    },
+  );
+
+  const data = (await res.json()) as ProtectedResourceResponse;
+  return {
+    status: res.status,
+    data,
+  };
 }
 
 export async function postResource(

@@ -4,6 +4,9 @@ import { normalizeOptionalAddress } from "@/lib/validation";
 import {
   getCreatedResourceSummaries,
   getCreatorAnalytics,
+  getRecentProtocolActivity,
+  getRecentPublications,
+  getRecentUnlocks,
   getProtocolStats,
 } from "@/services/analyticsService";
 import { listWalletPurchases } from "@/services/purchaseService";
@@ -20,13 +23,23 @@ export async function GET(request: Request) {
       return jsonError(400, "WALLET_REQUIRED", "wallet is required");
     }
 
-    const [stats, analytics, purchasedResources, createdResources] =
-      await Promise.all([
-        getProtocolStats(),
-        getCreatorAnalytics(wallet),
-        listWalletPurchases(wallet),
-        getCreatedResourceSummaries(wallet),
-      ]);
+    const [
+      stats,
+      analytics,
+      purchasedResources,
+      createdResources,
+      protocolActivity,
+      recentUnlocks,
+      recentPublications,
+    ] = await Promise.all([
+      getProtocolStats(),
+      getCreatorAnalytics(wallet),
+      listWalletPurchases(wallet),
+      getCreatedResourceSummaries(wallet),
+      getRecentProtocolActivity(12),
+      getRecentUnlocks(8),
+      getRecentPublications(8),
+    ]);
 
     return NextResponse.json({
       ok: true,
@@ -35,6 +48,9 @@ export async function GET(request: Request) {
       purchasedResources,
       createdResources,
       paymentHistory: purchasedResources,
+      protocolActivity,
+      recentUnlocks,
+      recentPublications,
     });
   } catch (error) {
     console.error(error);

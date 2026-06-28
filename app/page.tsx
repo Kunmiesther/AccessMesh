@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable react-hooks/set-state-in-effect */
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -9,7 +10,7 @@ import {
   getProtocolStats,
   getRecentActivity,
 } from "@/lib/api";
-import { formatUSDC, shortAddress } from "@/lib/ui";
+import { arcExplorerTxUrl, formatUSDC, shortAddress } from "@/lib/ui";
 import { useWallet } from "@/lib/ui/WalletContext";
 import type {
   ActivityEventType,
@@ -97,6 +98,8 @@ export default function LandingPage() {
             image: getResourceImage(resource.type),
             href: `/access/${resource.id}`,
             priceUSDC: resource.priceUSDC,
+            creatorWallet: resource.creatorWallet,
+            creatorDisplayName: resource.creatorDisplayName,
           }))
         : resourceFallbacks.map((resource) => ({ ...resource, href: "/explore" })),
     [resources],
@@ -241,7 +244,7 @@ export default function LandingPage() {
               value={loading ? "Loading..." : stats.totalUnlocks}
             />
             <StatCard
-              label="Total USDC Volume"
+              label="Total Volume"
               value={loading ? "Loading..." : formatUSDC(stats.totalUSDCVolume)}
             />
             <StatCard
@@ -457,6 +460,8 @@ function ResourcePreviewCard({
     image: string;
     href: string;
     priceUSDC?: number;
+    creatorWallet?: string;
+    creatorDisplayName?: string | null;
   };
 }) {
   return (
@@ -507,6 +512,18 @@ function ResourcePreviewCard({
         <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6 }}>
           {resource.description}
         </p>
+        {resource.creatorWallet && (
+          <p
+            style={{
+              marginTop: 12,
+              fontFamily: "var(--font-mono)",
+              fontSize: 12,
+              color: "var(--text-muted)",
+            }}
+          >
+            {resource.creatorDisplayName ?? shortAddress(resource.creatorWallet)}
+          </p>
+        )}
         {typeof resource.priceUSDC === "number" && (
           <p
             style={{
@@ -554,10 +571,27 @@ function ActivityRow({ entry }: { entry: RecentActivityEntry }) {
           <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
             {shortAddress(entry.wallet)}
           </span>{" "}
-          {activityMeta.verb} "{entry.resourceTitle || entry.resourceName}"
+          {`${activityMeta.verb} "${entry.resourceTitle || entry.resourceName}"`}
         </p>
       </div>
       <div style={{ textAlign: "right" }}>
+        {entry.txHash ? (
+          <a
+            href={arcExplorerTxUrl(entry.txHash)}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              display: "inline-block",
+              marginBottom: 6,
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              color: "var(--accent)",
+              textDecoration: "none",
+            }}
+          >
+            {shortAddress(entry.txHash)}
+          </a>
+        ) : null}
         <span
           style={{
             fontFamily: "var(--font-mono)",

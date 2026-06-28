@@ -1,17 +1,19 @@
 "use client";
+/* eslint-disable react-hooks/set-state-in-effect */
 
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Navbar } from "@/components/Navbar";
-import { getResourceDetail } from "@/lib/api";
+import { getProtectedResource } from "@/lib/api";
 import { formatDate, formatUSDC, shortAddress } from "@/lib/ui";
 import { useWallet } from "@/lib/ui/WalletContext";
 import type { PublishedResourceType, ResourceDetail } from "@/types";
 
 type PageState =
   | { status: "loading" }
-  | { status: "done"; resource: ResourceDetail }
+  | { status: "locked"; resource: ResourceDetail }
+  | { status: "unlocked"; resource: ResourceDetail }
   | { status: "error"; message: string };
 
 export default function ResourceDetailPage() {
@@ -26,11 +28,28 @@ export default function ResourceDetailPage() {
   useEffect(() => {
     let cancelled = false;
 
-    getResourceDetail(id, address)
-      .then((response) => {
-        if (!cancelled) {
-          setState({ status: "done", resource: response.resource });
+    setState({ status: "loading" });
+    getProtectedResource(id, address)
+      .then(({ status, data }) => {
+        if (cancelled) {
+          return;
         }
+
+        if (status === 200 && data.ok) {
+          setState({ status: "unlocked", resource: data.resource });
+          return;
+        }
+
+        if (status === 402 && !data.ok) {
+          setState({ status: "locked", resource: data.resource });
+          return;
+        }
+
+        setState({
+          status: "error",
+          message:
+            "resource could not be loaded. Please refresh or try again later.",
+        });
       })
       .catch((error: Error) => {
         if (!cancelled) {
@@ -43,7 +62,11 @@ export default function ResourceDetailPage() {
     };
   }, [currentKey, address, id]);
 
-  const isStale = state.status === "done" && state.resource.id !== id;
+  const resource =
+    state.status === "locked" || state.status === "unlocked"
+      ? state.resource
+      : null;
+  const isStale = resource ? resource.id !== id : false;
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
@@ -65,19 +88,19 @@ export default function ResourceDetailPage() {
           </section>
         )}
 
-        {state.status === "done" && !isStale && (
+        {resource && !isStale && (
           <div style={{ display: "grid", gap: 18 }}>
-            {published && <PublishedSuccessPanel resource={state.resource} />}
-            <ResourceHeader resource={state.resource} />
-            {state.resource.owned ? (
-              <UnlockedContent resource={state.resource} />
+            {published && <PublishedSuccessPanel resource={resource} />}
+            <ResourceHeader resource={resource} />
+            {state.status === "unlocked" ? (
+              <UnlockedContent resource={resource} />
             ) : (
               <LockedContent
                 onUnlock={() => {
                   if (address) {
-                    router.push(`/access/${state.resource.id}`);
+                    router.push(`/access/${resource.id}`);
                   } else {
-                    router.push(`/wallet?next=/resource/${state.resource.id}`);
+                    router.push(`/wallet?next=/resource/${resource.id}`);
                   }
                 }}
               />
@@ -91,7 +114,9 @@ export default function ResourceDetailPage() {
 
 function ResourceHeader({ resource }: { resource: ResourceDetail }) {
   const categoryLabel = resource.resourceCategory ?? resource.category;
-  const creatorLabel = resource.creatorDisplayName ?? shortAddress(resource.creatorWallet);
+  const creatorLabel = resource.creatorDisplayName?.trim().length
+    ? resource.creatorDisplayName.trim()
+    : shortAddress(resource.creatorWallet);
 
   return (
     <section style={headerPanelStyle}>
@@ -115,12 +140,22 @@ function ResourceHeader({ resource }: { resource: ResourceDetail }) {
           <p style={descriptionStyle}>{resource.description}</p>
 
           <div style={metaGridStyle}>
-            <MetaItem label="Creator" value={creatorLabel} />
+            <MetaItem
+              label="Creator"
+              value={
+                <Link href={`/creator/${resource.creatorWallet}`} style={creatorLinkStyle}>
+                  <span>{creatorLabel}</span>
+                  <span style={creatorWalletStyle}>{shortAddress(resource.creatorWallet)}</span>
+                </Link>
+              }
+            />
             <MetaItem label="Category" value={categoryLabel} />
             <MetaItem label="Publish date" value={formatDate(resource.createdAt)} />
             <MetaItem label="Price" value={formatUSDC(resource.priceUSDC)} />
             <MetaItem label="Unlock count" value={String(resource.unlockCount)} />
           </div>
+
+          <ResourceActionBar resource={resource} />
         </div>
       </div>
     </section>
@@ -128,29 +163,6 @@ function ResourceHeader({ resource }: { resource: ResourceDetail }) {
 }
 
 function PublishedSuccessPanel({ resource }: { resource: ResourceDetail }) {
-  const shareUrl = `/resource/${resource.id}`;
-
-  async function handleCopyLink() {
-    const url = new URL(shareUrl, window.location.origin).toString();
-    try {
-      await window.navigator.clipboard.writeText(url);
-    } catch {
-      window.prompt("Copy this link", url);
-    }
-  }
-
-  function handleShareOnX() {
-    const url = new URL(shareUrl, window.location.origin).toString();
-    const shareText = encodeURIComponent(
-      `I just published "${resource.title || resource.name}" on AccessMesh.`,
-    );
-    window.open(
-      `https://x.com/intent/tweet?text=${shareText}&url=${encodeURIComponent(url)}`,
-      "_blank",
-      "noopener,noreferrer",
-    );
-  }
-
   return (
     <section style={panelStyle}>
       <p style={eyebrowStyle}>Published</p>
@@ -159,16 +171,9 @@ function PublishedSuccessPanel({ resource }: { resource: ResourceDetail }) {
         Your public resource page is live. Copy the link below or share it on X.
       </p>
       <div style={linkBoxStyle}>
-        <span style={{ overflowWrap: "anywhere" }}>{shareUrl}</span>
+        <span style={{ overflowWrap: "anywhere" }}>{`/resource/${resource.id}`}</span>
       </div>
-      <div style={shareActionsStyle}>
-        <button type="button" onClick={handleCopyLink} style={primaryButtonStyle}>
-          Copy Link
-        </button>
-        <button type="button" onClick={handleShareOnX} style={secondaryButtonStyle}>
-          Share on X
-        </button>
-      </div>
+      <ResourceActionBar resource={resource} mode="published" />
     </section>
   );
 }
@@ -180,10 +185,10 @@ function LockedContent({
 }) {
   return (
     <section style={panelStyle}>
-      <p style={eyebrowStyle}>Locked Preview</p>
-      <h2 style={sectionTitleStyle}>Locked Preview</h2>
+      <p style={eyebrowStyle}>Locked preview</p>
+      <h2 style={sectionTitleStyle}>Read Article, Download, or Open Resource</h2>
       <p style={bodyStyle}>
-        This resource is locked. Protected content is hidden until access is unlocked.
+        This resource is locked. Protected content stays hidden until access is unlocked.
       </p>
       <div style={previewStyle}>
         <div style={{ height: 10, width: "82%", background: "var(--border)" }} />
@@ -206,11 +211,12 @@ function LockedContent({
 
 function UnlockedContent({ resource }: { resource: ResourceDetail }) {
   const contentType = resolvePublishedResourceType(resource);
+  const title = getContentActionLabel(contentType);
 
   return (
     <section style={panelStyle}>
       <p style={eyebrowStyle}>Unlocked content</p>
-      <h2 style={sectionTitleStyle}>Resource access</h2>
+      <h2 style={sectionTitleStyle}>{title}</h2>
       {contentType === "ARTICLE" && <ArticleContent resource={resource} />}
       {contentType === "FILE_UPLOAD" && <FileContent resource={resource} />}
       {contentType === "EXTERNAL_LINK" && <ExternalLinkContent resource={resource} />}
@@ -224,6 +230,7 @@ function ArticleContent({ resource }: { resource: ResourceDetail }) {
   return (
     <div style={{ marginTop: 16 }}>
       <div
+        id={`article-${resource.id}`}
         className="resource-markdown"
         dangerouslySetInnerHTML={{ __html: markdownToHtml(markdown) }}
       />
@@ -344,11 +351,66 @@ function ExternalLinkContent({ resource }: { resource: ResourceDetail }) {
   );
 }
 
-function MetaItem({ label, value }: { label: string; value: string }) {
+function ResourceActionBar({
+  resource,
+  mode = "unlocked",
+}: {
+  resource: ResourceDetail;
+  mode?: "published" | "unlocked";
+}) {
+  const shareUrl = `/resource/${resource.id}`;
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => setCopied(false), 1800);
+    return () => window.clearTimeout(timeout);
+  }, [copied]);
+
+  async function handleCopyLink() {
+    const url = new URL(shareUrl, window.location.origin).toString();
+    try {
+      await window.navigator.clipboard.writeText(url);
+      setCopied(true);
+    } catch {
+      window.prompt("Copy this link", url);
+    }
+  }
+
+  function handleShareOnX() {
+    const url = new URL(shareUrl, window.location.origin).toString();
+    const shareText = encodeURIComponent(
+      mode === "published"
+        ? `I just published "${resource.title || resource.name}" on AccessMesh.`
+        : `I just unlocked "${resource.title || resource.name}" on AccessMesh.`,
+    );
+    window.open(
+      `https://x.com/intent/tweet?text=${shareText}&url=${encodeURIComponent(url)}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }
+
+  return (
+    <div style={resourceActionRowStyle}>
+      <button type="button" onClick={handleCopyLink} style={secondaryButtonStyle}>
+        {copied ? "Link copied" : "Copy resource link"}
+      </button>
+      <button type="button" onClick={handleShareOnX} style={secondaryButtonStyle}>
+        Share on X
+      </button>
+    </div>
+  );
+}
+
+function MetaItem({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div style={metaItemStyle}>
       <p style={metaLabelStyle}>{label}</p>
-      <p style={metaValueStyle}>{value}</p>
+      <div style={metaValueStyle}>{value}</div>
     </div>
   );
 }
@@ -373,6 +435,18 @@ function resolvePublishedResourceType(resource: ResourceDetail): PublishedResour
   }
 
   return "EXTERNAL_LINK";
+}
+
+function getContentActionLabel(resourceType: PublishedResourceType) {
+  if (resourceType === "ARTICLE") {
+    return "Read Article";
+  }
+
+  if (resourceType === "FILE_UPLOAD") {
+    return "Download";
+  }
+
+  return "Open Resource";
 }
 
 function getMarkdownContent(resource: ResourceDetail) {
@@ -695,6 +769,17 @@ const metaValueStyle = {
   lineHeight: 1.5,
 } satisfies CSSProperties;
 
+const creatorLinkStyle = {
+  display: "grid",
+  gap: 3,
+  color: "var(--text-primary)",
+  textDecoration: "none",
+} satisfies CSSProperties;
+
+const creatorWalletStyle = {
+  color: "var(--text-secondary)",
+} satisfies CSSProperties;
+
 const previewStyle = {
   display: "grid",
   gap: 10,
@@ -720,10 +805,11 @@ const linkBoxStyle = {
   marginBottom: 16,
 } satisfies CSSProperties;
 
-const shareActionsStyle = {
+const resourceActionRowStyle = {
   display: "flex",
-  gap: 12,
+  gap: 10,
   flexWrap: "wrap",
+  marginTop: 16,
 } satisfies CSSProperties;
 
 const primaryButtonStyle = {
