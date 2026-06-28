@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CSSProperties, ReactNode } from "react";
 import { FormEvent, useEffect, useState } from "react";
+import { CoverImageUpload } from "@/components/CoverImageUpload";
 import { Navbar } from "@/components/Navbar";
 import { postResource } from "@/lib/api";
 import { useWallet } from "@/lib/ui/WalletContext";
@@ -49,7 +50,7 @@ export function CreateResourcePage() {
   const [articleContent, setArticleContent] = useState("");
   const [resourceFile, setResourceFile] = useState<File | null>(null);
   const [externalUrl, setExternalUrl] = useState("");
-  const [coverImage, setCoverImage] = useState("");
+  const [coverImageFile, setCoverImageFile] = useState<File | null>(null);
   const [tags, setTags] = useState("");
 
   useEffect(() => {
@@ -74,6 +75,9 @@ export function CreateResourcePage() {
     setState({ status: "submitting" });
 
     try {
+      const coverImage = coverImageFile
+        ? await readFileAsDataUrl(coverImageFile)
+        : undefined;
       const resourceData = await buildResourceData({
         resourceType,
         articleContent,
@@ -89,7 +93,7 @@ export function CreateResourcePage() {
           category,
           priceUSDC,
           resourceType,
-          coverImage: coverImage.trim() || undefined,
+          coverImage,
           tags,
           ...resourceData,
         },
@@ -276,14 +280,11 @@ export function CreateResourcePage() {
               )}
 
               <Field label="Cover image" htmlFor="coverImage">
-                <input
-                  id="coverImage"
-                  type="url"
-                  value={coverImage}
+                <CoverImageUpload
+                  inputId="coverImage"
+                  value={coverImageFile}
                   disabled={disabled}
-                  onChange={(event) => setCoverImage(event.target.value)}
-                  placeholder="https://"
-                  style={inputStyle}
+                  onChange={setCoverImageFile}
                 />
               </Field>
 

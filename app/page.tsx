@@ -95,7 +95,7 @@ export default function LandingPage() {
             type: resource.type,
             name: resource.name,
             description: resource.description,
-            image: getResourceImage(resource.type),
+            image: resource.coverImage || getResourceImage(resource.type),
             href: `/access/${resource.id}`,
             priceUSDC: resource.priceUSDC,
             creatorWallet: resource.creatorWallet,
@@ -189,7 +189,13 @@ export default function LandingPage() {
               Unlock premium knowledge with USDC. Create valuable resources.
               Own your reputation on-chain.
             </p>
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <div style={heroActionsStyle}>
+              <Link href="/create" style={primaryButtonStyle}>
+                Publish Resource
+              </Link>
+              <Link href="/explore" style={secondaryButtonStyle}>
+                Explore Resources
+              </Link>
               {connected && address ? (
                 <div
                   style={{
@@ -218,13 +224,10 @@ export default function LandingPage() {
                   />
                 </div>
               ) : (
-                <Link href="/wallet" style={primaryButtonStyle}>
+                <Link href="/wallet" style={connectWalletButtonStyle}>
                   Connect Wallet
                 </Link>
               )}
-              <Link href="/explore" style={secondaryButtonStyle}>
-                Explore Resources
-              </Link>
             </div>
           </div>
         </section>
@@ -690,6 +693,13 @@ const resourceGridStyle = {
   gap: 16,
 } satisfies React.CSSProperties;
 
+const heroActionsStyle = {
+  display: "flex",
+  gap: 12,
+  flexWrap: "wrap",
+  alignItems: "center",
+} satisfies React.CSSProperties;
+
 const primaryButtonStyle = {
   background: "var(--accent)",
   color: "#000",
@@ -699,6 +709,13 @@ const primaryButtonStyle = {
   textDecoration: "none",
   fontSize: 13,
   fontWeight: 600,
+} satisfies React.CSSProperties;
+
+const connectWalletButtonStyle = {
+  ...primaryButtonStyle,
+  background: "rgba(17,17,17,0.74)",
+  color: "var(--text-primary)",
+  border: "1px solid var(--border)",
 } satisfies React.CSSProperties;
 
 const connectedWalletButtonStyle = {

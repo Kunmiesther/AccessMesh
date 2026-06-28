@@ -116,6 +116,11 @@ export default function ExplorePage() {
             <p style={subtitleStyle}>
               Browse published resources from creators on AccessMesh.
             </p>
+            <div style={heroActionRowStyle}>
+              <Link href="/create" style={primaryActionButtonStyle}>
+                + Create Resource
+              </Link>
+            </div>
           </div>
           <div style={heroStatsStyle}>
             <StatCard label="Published resources" value={resources.length} />
@@ -286,6 +291,13 @@ const heroStatsStyle = {
   gap: 14,
 } satisfies CSSProperties;
 
+const heroActionRowStyle = {
+  display: "flex",
+  gap: 12,
+  flexWrap: "wrap",
+  marginTop: 18,
+} satisfies CSSProperties;
+
 const eyebrowStyle = {
   fontFamily: "var(--font-mono)",
   fontSize: 11,
@@ -340,6 +352,20 @@ const inputStyle = {
   padding: "10px 12px",
   fontSize: 13,
   outline: "none",
+} satisfies CSSProperties;
+
+const primaryActionButtonStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "var(--accent)",
+  color: "#000",
+  border: "1px solid var(--accent)",
+  borderRadius: 4,
+  padding: "10px 14px",
+  textDecoration: "none",
+  fontSize: 13,
+  fontWeight: 600,
 } satisfies CSSProperties;
 
 const gridStyle = {

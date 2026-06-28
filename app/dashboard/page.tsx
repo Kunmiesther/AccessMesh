@@ -103,6 +103,21 @@ export default function DashboardPage() {
           </p>
         </header>
 
+        {connected && address && (
+          <section style={createCtaStyle}>
+            <div>
+              <p style={eyebrowStyle}>Publishing</p>
+              <h2 style={createCtaTitleStyle}>Create Resource</h2>
+              <p style={createCtaBodyStyle}>
+                Publish a new article, file upload, or external link behind a USDC price.
+              </p>
+            </div>
+            <Link href="/create" style={primaryButtonStyle}>
+              Create Resource
+            </Link>
+          </section>
+        )}
+
         {!connected || !address ? (
           <section style={emptyStateStyle}>
             <p style={{ color: "var(--text-secondary)", lineHeight: 1.6 }}>
@@ -197,7 +212,14 @@ export default function DashboardPage() {
                 <div style={resourceGridStyle}>
                   {dashboard.createdResources.map((resource) => (
                     <Link key={resource.id} href={`/resource/${resource.id}`} style={resourceCardStyle}>
-                      <div style={resourceCardCoverStyle}>
+                      <div
+                        style={{
+                          ...resourceCardCoverStyle,
+                          backgroundImage: resource.coverImage
+                            ? `linear-gradient(135deg, rgba(6, 8, 10, 0.2), rgba(6, 8, 10, 0.72)), url("${encodeURI(resource.coverImage)}")`
+                            : undefined,
+                        }}
+                      >
                         <span style={resourceTypeStyle}>
                           {resource.resourceCategory ?? resource.category}
                         </span>
@@ -420,6 +442,34 @@ const activityMetaMap: Record<ActivityEventType, { label: string; verb: string }
 
 const sectionStyle = {
   marginBottom: 28,
+} satisfies CSSProperties;
+
+const createCtaStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 16,
+  background:
+    "linear-gradient(135deg, rgba(0,194,168,0.08), rgba(255,255,255,0.02)), var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 12,
+  padding: 22,
+  marginBottom: 28,
+  flexWrap: "wrap",
+} satisfies CSSProperties;
+
+const createCtaTitleStyle = {
+  fontSize: 20,
+  lineHeight: 1.25,
+  color: "var(--text-primary)",
+  marginBottom: 8,
+} satisfies CSSProperties;
+
+const createCtaBodyStyle = {
+  fontSize: 14,
+  color: "var(--text-secondary)",
+  lineHeight: 1.7,
+  maxWidth: 620,
 } satisfies CSSProperties;
 
 const eyebrowStyle = {
