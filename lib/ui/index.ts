@@ -34,13 +34,36 @@ export function normaliseStatus(raw: string): string {
 }
 
 export function arcExplorerTxUrl(txHash: string): string {
-  return `${normalizeExplorerBase(ArcTestnet.explorerUrl)}/tx/${txHash}`;
+  return `${getArcExplorerBase()}/tx/${encodeURIComponent(txHash)}`;
 }
 
 export function arcExplorerAddressUrl(address: string): string {
-  return `${normalizeExplorerBase(ArcTestnet.explorerUrl)}/address/${address}`;
+  return `${getArcExplorerBase()}/address/${encodeURIComponent(address)}`;
 }
 
-function normalizeExplorerBase(url: string) {
+export function appResourceUrl(resourceId: string): string {
+  return buildAppUrl(`/resource/${resourceId}`);
+}
+
+export function buildAppUrl(path: string): string {
+  const configuredBase = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const runtimeBase =
+    typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+  const base = normalizeBaseUrl(configuredBase || runtimeBase);
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+
+  return `${base}${normalizedPath}`;
+}
+
+function getArcExplorerBase() {
+  const explorerUrl = ArcTestnet.explorerUrl || "https://testnet.arcscan.app";
+  const withoutTemplate = explorerUrl
+    .replace(/\/tx\/\{hash\}\/?$/i, "")
+    .replace(/\/address\/\{address\}\/?$/i, "");
+
+  return normalizeBaseUrl(withoutTemplate);
+}
+
+function normalizeBaseUrl(url: string) {
   return url.replace(/\/+$/, "");
 }

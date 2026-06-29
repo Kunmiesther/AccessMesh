@@ -6,7 +6,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Navbar } from "@/components/Navbar";
 import { getProtectedResource } from "@/lib/api";
-import { formatDate, formatUSDC, shortAddress } from "@/lib/ui";
+import { appResourceUrl, formatDate, formatUSDC, shortAddress } from "@/lib/ui";
 import { useWallet } from "@/lib/ui/WalletContext";
 import type { PublishedResourceType, ResourceDetail } from "@/types";
 
@@ -163,6 +163,8 @@ function ResourceHeader({ resource }: { resource: ResourceDetail }) {
 }
 
 function PublishedSuccessPanel({ resource }: { resource: ResourceDetail }) {
+  const resourceUrl = appResourceUrl(resource.id);
+
   return (
     <section style={panelStyle}>
       <p style={eyebrowStyle}>Published</p>
@@ -171,7 +173,7 @@ function PublishedSuccessPanel({ resource }: { resource: ResourceDetail }) {
         Your public resource page is live. Copy the link below or share it on X.
       </p>
       <div style={linkBoxStyle}>
-        <span style={{ overflowWrap: "anywhere" }}>{`/resource/${resource.id}`}</span>
+        <span style={{ overflowWrap: "anywhere" }}>{resourceUrl}</span>
       </div>
       <ResourceActionBar resource={resource} mode="published" />
     </section>
@@ -358,7 +360,7 @@ function ResourceActionBar({
   resource: ResourceDetail;
   mode?: "published" | "unlocked";
 }) {
-  const shareUrl = `/resource/${resource.id}`;
+  const shareUrl = appResourceUrl(resource.id);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -371,24 +373,22 @@ function ResourceActionBar({
   }, [copied]);
 
   async function handleCopyLink() {
-    const url = new URL(shareUrl, window.location.origin).toString();
     try {
-      await window.navigator.clipboard.writeText(url);
+      await window.navigator.clipboard.writeText(shareUrl);
       setCopied(true);
     } catch {
-      window.prompt("Copy this link", url);
+      window.prompt("Copy this link", shareUrl);
     }
   }
 
   function handleShareOnX() {
-    const url = new URL(shareUrl, window.location.origin).toString();
     const shareText = encodeURIComponent(
       mode === "published"
         ? `I just published "${resource.title || resource.name}" on AccessMesh.`
         : `I just unlocked "${resource.title || resource.name}" on AccessMesh.`,
     );
     window.open(
-      `https://x.com/intent/tweet?text=${shareText}&url=${encodeURIComponent(url)}`,
+      `https://x.com/intent/tweet?text=${shareText}&url=${encodeURIComponent(shareUrl)}`,
       "_blank",
       "noopener,noreferrer",
     );

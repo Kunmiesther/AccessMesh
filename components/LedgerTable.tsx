@@ -1,7 +1,7 @@
 "use client";
 
 import type { LedgerEntry } from "@/types";
-import { formatDate, normaliseStatus, shortAddress } from "@/lib/ui";
+import { arcExplorerTxUrl, formatDate, normaliseStatus, shortAddress } from "@/lib/ui";
 
 const STATUS_COLORS: Record<string, string> = {
   unlocked: "var(--success)",
@@ -56,7 +56,6 @@ export function LedgerTable({ entries }: Props) {
         overflow: "hidden",
       }}
     >
-      {/* Table header */}
       <div
         style={{
           display: "grid",
@@ -82,7 +81,6 @@ export function LedgerTable({ entries }: Props) {
         ))}
       </div>
 
-      {/* Rows */}
       <div>
         {entries.map((entry, i) => (
           <div
@@ -97,7 +95,6 @@ export function LedgerTable({ entries }: Props) {
               alignItems: "center",
             }}
           >
-            {/* Resource */}
             <span
               style={{
                 fontFamily: "var(--font-mono)",
@@ -111,7 +108,6 @@ export function LedgerTable({ entries }: Props) {
               {shortAddress(entry.resourceId)}
             </span>
 
-            {/* Status */}
             <span
               style={{
                 fontSize: 11,
@@ -134,21 +130,19 @@ export function LedgerTable({ entries }: Props) {
               {normaliseStatus(entry.status)}
             </span>
 
-            {/* Tx Hash */}
-            <span
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 12,
-                color: "var(--text-muted)",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {entry.txHash ? shortAddress(entry.txHash) : "—"}
-            </span>
+            {entry.txHash ? (
+              <a
+                href={arcExplorerTxUrl(entry.txHash)}
+                target="_blank"
+                rel="noreferrer"
+                style={txLinkStyle}
+              >
+                {shortAddress(entry.txHash)}
+              </a>
+            ) : (
+              <span style={txTextStyle}>-</span>
+            )}
 
-            {/* Date */}
             <span
               style={{
                 fontSize: 12,
@@ -164,3 +158,22 @@ export function LedgerTable({ entries }: Props) {
     </div>
   );
 }
+
+const txLinkStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 12,
+  color: "var(--accent)",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  textDecoration: "none",
+} as const;
+
+const txTextStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 12,
+  color: "var(--text-muted)",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+} as const;

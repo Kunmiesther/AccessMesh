@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { ResourceMeta } from "@/types";
-import { arcExplorerTxUrl } from "@/lib/ui";
+import { appResourceUrl, arcExplorerTxUrl } from "@/lib/ui";
 
 type Props = {
   resource: ResourceMeta;
@@ -13,6 +13,7 @@ type Props = {
 export function UnlockStatusTracker({ resource, txHash }: Props) {
   const [copied, setCopied] = useState(false);
   const resourceUrl = `/resource/${resource.id}`;
+  const absoluteResourceUrl = appResourceUrl(resource.id);
   const explorerUrl = arcExplorerTxUrl(txHash);
 
   useEffect(() => {
@@ -25,22 +26,20 @@ export function UnlockStatusTracker({ resource, txHash }: Props) {
   }, [copied]);
 
   async function copyResourceLink() {
-    const absoluteUrl = new URL(resourceUrl, window.location.origin).toString();
     try {
-      await window.navigator.clipboard.writeText(absoluteUrl);
+      await window.navigator.clipboard.writeText(absoluteResourceUrl);
       setCopied(true);
     } catch {
-      window.prompt("Copy this link", absoluteUrl);
+      window.prompt("Copy this link", absoluteResourceUrl);
     }
   }
 
   function shareOnX() {
-    const absoluteUrl = new URL(resourceUrl, window.location.origin).toString();
     const text = encodeURIComponent(
       `Unlocked "${resource.title || resource.name}" on AccessMesh.`,
     );
     window.open(
-      `https://x.com/intent/tweet?text=${text}&url=${encodeURIComponent(absoluteUrl)}`,
+      `https://x.com/intent/tweet?text=${text}&url=${encodeURIComponent(absoluteResourceUrl)}`,
       "_blank",
       "noopener,noreferrer",
     );

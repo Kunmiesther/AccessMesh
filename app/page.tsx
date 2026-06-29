@@ -27,38 +27,6 @@ const EMPTY_STATS: ProtocolStats = {
   totalCreators: 0,
 };
 
-const resourceFallbacks: Array<{
-  type: ResourceType;
-  name: string;
-  description: string;
-  image: string;
-}> = [
-  {
-    type: "CONTENT",
-    name: "AI Agent Blueprint",
-    description: "A practical guide to designing revenue-ready AI workflows.",
-    image: "/images/resource-content.jpg",
-  },
-  {
-    type: "DATASET",
-    name: "Research Signal Vault",
-    description: "Curated market and protocol research for operators.",
-    image: "/images/resource-dataset.jpg",
-  },
-  {
-    type: "API",
-    name: "Web3 Growth API",
-    description: "Unlock high-intent growth signals for on-chain teams.",
-    image: "/images/resource-api.jpg",
-  },
-  {
-    type: "TOOL",
-    name: "Developer Guide Kit",
-    description: "Premium implementation notes for production builders.",
-    image: "/images/resource-tool.jpg",
-  },
-];
-
 export default function LandingPage() {
   const { address, connected } = useWallet();
   const [stats, setStats] = useState<ProtocolStats>(EMPTY_STATS);
@@ -90,18 +58,16 @@ export default function LandingPage() {
 
   const featured = useMemo(
     () =>
-      resources.length > 0
-        ? resources.slice(0, 4).map((resource) => ({
-            type: resource.type,
-            name: resource.name,
-            description: resource.description,
-            image: resource.coverImage || getResourceImage(resource.type),
-            href: `/access/${resource.id}`,
-            priceUSDC: resource.priceUSDC,
-            creatorWallet: resource.creatorWallet,
-            creatorDisplayName: resource.creatorDisplayName,
-          }))
-        : resourceFallbacks.map((resource) => ({ ...resource, href: "/explore" })),
+      resources.slice(0, 4).map((resource) => ({
+        type: resource.type,
+        name: resource.name,
+        description: resource.description,
+        image: resource.coverImage || getResourceImage(resource.type),
+        href: `/access/${resource.id}`,
+        priceUSDC: resource.priceUSDC,
+        creatorWallet: resource.creatorWallet,
+        creatorDisplayName: resource.creatorDisplayName,
+      })),
     [resources],
   );
 
@@ -263,11 +229,23 @@ export default function LandingPage() {
             title="Knowledge markets for operators"
             action={<Link href="/explore" style={inlineActionStyle}>View all</Link>}
           />
-          <div style={resourceGridStyle}>
-            {featured.map((resource) => (
-              <ResourcePreviewCard key={resource.name} resource={resource} />
-            ))}
-          </div>
+          {loading ? (
+            <section style={emptyStateStyle}>
+              <p style={{ color: "var(--text-muted)" }}>Loading featured resources...</p>
+            </section>
+          ) : featured.length > 0 ? (
+            <div style={resourceGridStyle}>
+              {featured.map((resource) => (
+                <ResourcePreviewCard key={resource.name} resource={resource} />
+              ))}
+            </div>
+          ) : (
+            <section style={emptyStateStyle}>
+              <p style={{ color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                No resources have been published yet.
+              </p>
+            </section>
+          )}
         </section>
 
         <section style={sectionStyle}>
@@ -691,6 +669,13 @@ const resourceGridStyle = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
   gap: 16,
+} satisfies React.CSSProperties;
+
+const emptyStateStyle = {
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+  padding: 20,
 } satisfies React.CSSProperties;
 
 const heroActionsStyle = {
