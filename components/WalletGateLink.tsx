@@ -19,8 +19,9 @@ export function WalletGateLink({
   style,
   title,
 }: Props) {
-  const { connected } = useWallet();
-  const target = connected ? href : `/wallet?next=${encodeURIComponent(href)}`;
+  const { connected, ready } = useWallet();
+  const target =
+    ready && !connected ? `/wallet?next=${encodeURIComponent(href)}` : href;
 
   return (
     <Link href={target} className={className} style={style} title={title}>

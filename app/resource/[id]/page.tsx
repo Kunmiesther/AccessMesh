@@ -26,7 +26,7 @@ export default function ResourceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { address } = useWallet();
+  const { address, connected, ready } = useWallet();
   const [state, setState] = useState<PageState>({ status: "loading" });
   const published = searchParams.get("published") === "1";
   const currentKey = `${id}:${address ?? ""}`;
@@ -103,7 +103,11 @@ export default function ResourceDetailPage() {
             ) : (
               <LockedContent
                 onUnlock={() => {
-                  if (address) {
+                  if (!ready) {
+                    return;
+                  }
+
+                  if (connected && address) {
                     router.push(`/access/${resource.id}`);
                   } else {
                     router.push(`/wallet?next=/resource/${resource.id}`);

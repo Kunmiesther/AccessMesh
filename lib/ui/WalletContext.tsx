@@ -10,17 +10,21 @@ import {
   type ReactNode,
 } from "react";
 import {
+  clearStoredWalletSession,
+  getStoredWalletSession,
   initWallet,
+  restoreWalletSession,
+  storeWalletSession,
   type ModularWalletSession,
   type WalletInitOptions,
 } from "@/lib/modular-wallet";
-import { getAddress, isAddress } from "viem";
 
 type WalletContextValue = {
   address: ModularWalletSession["address"] | null;
   smartAccount: ModularWalletSession["smartAccount"] | null;
   bundlerClient: ModularWalletSession["bundlerClient"] | null;
   connected: boolean;
+  ready: boolean;
   loading: boolean;
   error: string | null;
   connectWallet: (
@@ -35,6 +39,7 @@ const WalletContext = createContext<WalletContextValue>({
   smartAccount: null,
   bundlerClient: null,
   connected: false,
+  ready: false,
   loading: false,
   error: null,
   connectWallet: async () => {
@@ -43,8 +48,6 @@ const WalletContext = createContext<WalletContextValue>({
   disconnect: () => {},
 });
 
-const STORAGE_KEY = "accessmesh_modular_wallet_address";
-
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [address, setAddress] =
     useState<ModularWalletSession["address"] | null>(null);
@@ -52,41 +55,90 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     useState<ModularWalletSession["smartAccount"] | null>(null);
   const [bundlerClient, setBundlerClient] =
     useState<ModularWalletSession["bundlerClient"] | null>(null);
+  const [session, setActiveSession] = useState<ModularWalletSession | null>(null);
+  const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(STORAGE_KEY);
-      if (stored && isAddress(stored)) {
-        setAddress(getAddress(stored) as ModularWalletSession["address"]);
-      } else if (stored) {
-        window.localStorage.removeItem(STORAGE_KEY);
-      }
-    } catch {
-      // storage unavailable
-    }
+  const setSession = useCallback((session: ModularWalletSession) => {
+    setActiveSession(session);
+    setAddress(session.address);
+    setSmartAccount(session.smartAccount);
+    setBundlerClient(session.bundlerClient);
   }, []);
+
+  const clearSession = useCallback(() => {
+    setActiveSession(null);
+    setAddress(null);
+    setSmartAccount(null);
+    setBundlerClient(null);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const stored = getStoredWalletSession();
+
+    if (!stored) {
+      setReady(true);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    restoreWalletSession(stored)
+      .then(async (session) => {
+        await restoreWalletIdentity(session.address);
+        if (cancelled) {
+          return;
+        }
+
+        setSession(session);
+        storeWalletSession(session);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) {
+          return;
+        }
+
+        if (err instanceof Error && /no longer matches/i.test(err.message)) {
+          clearStoredWalletSession();
+        }
+
+        clearSession();
+        setError(
+          err instanceof Error ? err.message : "Wallet session could not be restored.",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+          setReady(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clearSession, setSession]);
 
   const connectWallet = useCallback(async (
     username: string,
     options: WalletInitOptions = {},
   ) => {
+    if (session) {
+      return session;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
       const session = await initWallet(username, options);
       await restoreWalletIdentity(session.address);
-      setAddress(session.address);
-      setSmartAccount(session.smartAccount);
-      setBundlerClient(session.bundlerClient);
-
-      try {
-        window.localStorage.setItem(STORAGE_KEY, session.address);
-      } catch {
-        // storage unavailable
-      }
+      setSession(session);
+      storeWalletSession(session);
+      setReady(true);
 
       return session;
     } catch (err) {
@@ -97,19 +149,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [session, setSession]);
 
   const disconnect = useCallback(() => {
-    setAddress(null);
-    setSmartAccount(null);
-    setBundlerClient(null);
+    clearSession();
     setError(null);
-    try {
-      window.localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // storage unavailable
-    }
-  }, []);
+    clearStoredWalletSession();
+    setReady(true);
+  }, [clearSession]);
 
   return (
     <WalletContext.Provider
@@ -117,7 +164,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         address,
         smartAccount,
         bundlerClient,
-        connected: !!address,
+        connected: !!address && !!smartAccount && !!bundlerClient,
+        ready,
         loading,
         error,
         connectWallet,

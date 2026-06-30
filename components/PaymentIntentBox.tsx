@@ -31,7 +31,7 @@ export function PaymentIntentBox({
 
   async function handleUnlock() {
     if (!smartAccount || !bundlerClient) {
-      setErrorMsg("Reconnect your Circle Modular Wallet before unlocking.");
+      setErrorMsg("Active wallet session is not available. Refresh and sign in again if the session has expired.");
       return;
     }
 

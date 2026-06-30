@@ -36,12 +36,19 @@ const EMPTY_ANALYTICS: CreatorAnalytics = {
 };
 
 export default function DashboardPage() {
-  const { address, connected } = useWallet();
+  const { address, connected, ready } = useWallet();
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!ready) {
+      setDashboard(null);
+      setLoading(true);
+      setError(null);
+      return;
+    }
+
     if (!connected || !address) {
       setDashboard(null);
       setLoading(false);
@@ -79,7 +86,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [address, connected]);
+  }, [address, connected, ready]);
 
   const stats = dashboard?.stats ?? EMPTY_STATS;
   const analytics = dashboard?.analytics ?? EMPTY_ANALYTICS;
@@ -118,7 +125,13 @@ export default function DashboardPage() {
           </section>
         )}
 
-        {!connected || !address ? (
+        {!ready ? (
+          <section style={emptyStateStyle}>
+            <p style={{ color: "var(--text-secondary)" }}>
+              Restoring authenticated wallet...
+            </p>
+          </section>
+        ) : !connected || !address ? (
           <section style={emptyStateStyle}>
             <p style={{ color: "var(--text-secondary)", lineHeight: 1.6 }}>
               Connect a wallet to view creator analytics and protocol performance.

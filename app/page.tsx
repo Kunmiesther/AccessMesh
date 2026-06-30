@@ -28,7 +28,7 @@ const EMPTY_STATS: ProtocolStats = {
 };
 
 export default function LandingPage() {
-  const { address, connected } = useWallet();
+  const { address, connected, ready } = useWallet();
   const [stats, setStats] = useState<ProtocolStats>(EMPTY_STATS);
   const [resources, setResources] = useState<ResourceMeta[]>([]);
   const [activity, setActivity] = useState<RecentActivityEntry[]>([]);
@@ -162,7 +162,9 @@ export default function LandingPage() {
               <Link href="/explore" style={secondaryButtonStyle}>
                 Explore Resources
               </Link>
-              {connected && address ? (
+              {!ready ? (
+                <span style={connectWalletButtonStyle}>Restoring wallet...</span>
+              ) : connected && address ? (
                 <div
                   style={{
                     display: "inline-flex",

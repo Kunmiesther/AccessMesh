@@ -7,7 +7,7 @@ import { useWallet } from "@/lib/ui/WalletContext";
 import { shortAddress } from "@/lib/ui";
 
 export function Navbar() {
-  const { address, connected, disconnect } = useWallet();
+  const { address, connected, ready, disconnect } = useWallet();
 
   return (
     <nav
@@ -82,7 +82,21 @@ export function Navbar() {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {connected && address ? (
+          {!ready ? (
+            <span
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 12,
+                color: "var(--text-muted)",
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                borderRadius: 4,
+                padding: "5px 10px",
+              }}
+            >
+              Restoring wallet...
+            </span>
+          ) : connected && address ? (
             <>
               <Link
                 href="/dashboard"

@@ -26,17 +26,21 @@ type PageState =
 
 export default function AccessPage() {
   const { id } = useParams<{ id: string }>();
-  const { address, connected, smartAccount, bundlerClient } = useWallet();
+  const { address, connected, ready, smartAccount, bundlerClient } = useWallet();
   const [state, setState] = useState<PageState>({ phase: "no-wallet" });
 
   useEffect(() => {
+    if (!ready) {
+      return;
+    }
+
     if (!connected || !address) {
       setState({ phase: "no-wallet" });
       return;
     }
 
     setState({ phase: "idle" });
-  }, [id, address, connected]);
+  }, [id, address, connected, ready]);
 
   async function handleUnlockClick() {
     if (!address) {
@@ -129,8 +133,30 @@ export default function AccessPage() {
           <span style={{ color: "var(--text-secondary)" }}>{id}</span>
         </div>
 
+        {!ready && (
+          <div
+            style={{
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              padding: "32px 24px",
+              textAlign: "center",
+            }}
+          >
+            <p
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 13,
+                color: "var(--text-secondary)",
+              }}
+            >
+              Restoring authenticated wallet...
+            </p>
+          </div>
+        )}
+
         {/* No wallet */}
-        {state.phase === "no-wallet" && (
+        {ready && state.phase === "no-wallet" && (
           <div
             style={{
               background: "var(--surface)",
@@ -158,7 +184,7 @@ export default function AccessPage() {
         )}
 
         {/* Idle */}
-        {state.phase === "idle" && address && (
+        {ready && state.phase === "idle" && address && (
           <div
             style={{
               background: "var(--surface)",
@@ -222,7 +248,7 @@ export default function AccessPage() {
         )}
 
         {/* Loading */}
-        {state.phase === "loading-intent" && (
+        {ready && state.phase === "loading-intent" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <Skeleton height={280} />
             <Skeleton height={280} />
@@ -230,7 +256,7 @@ export default function AccessPage() {
         )}
 
         {/* Error */}
-        {state.phase === "error" && (
+        {ready && state.phase === "error" && (
           <div
             style={{
               background: "var(--surface)",
@@ -273,7 +299,7 @@ export default function AccessPage() {
         )}
 
         {/* Ready */}
-        {state.phase === "ready" && address && (
+        {ready && state.phase === "ready" && address && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <AccessCard
               resource={state.intent.resource}
@@ -292,7 +318,7 @@ export default function AccessPage() {
         )}
 
         {/* Unlocked */}
-        {state.phase === "unlocked" && (
+        {ready && state.phase === "unlocked" && (
           <UnlockStatusTracker
             resource={state.resource}
             txHash={state.txHash}

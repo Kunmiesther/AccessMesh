@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, Suspense, useState } from "react";
+import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Navbar } from "@/components/Navbar";
 import { useWallet } from "@/hooks/useWallet";
@@ -9,11 +9,17 @@ import { getStoredCredentialMode, type PasskeyCredentialMode } from "@/lib/modul
 function WalletPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { connectWallet, loading, error } = useWallet();
+  const { connected, ready, connectWallet, loading, error } = useWallet();
   const [username, setUsername] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [flowMode, setFlowMode] = useState<PasskeyCredentialMode | null>(null);
-  const nextPath = searchParams.get("next") || "/dashboard";
+  const nextPath = searchParams.get("next") || "/";
+
+  useEffect(() => {
+    if (ready && connected) {
+      router.replace(nextPath.startsWith("/") ? nextPath : "/");
+    }
+  }, [connected, nextPath, ready, router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -30,7 +36,7 @@ function WalletPageContent() {
     await connectWallet(trimmedUsername, {
       onCredentialMode: setFlowMode,
     });
-    router.push(nextPath.startsWith("/") ? nextPath : "/dashboard");
+    router.push(nextPath.startsWith("/") ? nextPath : "/");
   }
 
   const visibleError = formError ?? error;

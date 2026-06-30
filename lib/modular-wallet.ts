@@ -8,11 +8,13 @@ import {
   toWebAuthnCredential,
   type ToCircleSmartAccountReturnType,
 } from "@circle-fin/modular-wallets-core";
-import { createPublicClient, type Address } from "viem";
+import { createPublicClient, getAddress, isAddress, type Address, type Hex } from "viem";
 import { createBundlerClient, toWebAuthnAccount } from "viem/account-abstraction";
 import { arcTestnet } from "viem/chains";
 
 const CREDENTIAL_STORAGE_PREFIX = "accessmesh.modularWallet.credential.";
+const ACTIVE_SESSION_STORAGE_KEY = "accessmesh.modularWallet.activeSession";
+const LEGACY_ADDRESS_STORAGE_KEY = "accessmesh_modular_wallet_address";
 const MODULAR_WALLET_CHAIN = arcTestnet;
 const MODULAR_WALLET_CHAIN_PATH = "arcTestnet";
 
@@ -20,6 +22,14 @@ export type PasskeyCredentialMode = "existing" | "new";
 
 export type WalletInitOptions = {
   onCredentialMode?: (mode: PasskeyCredentialMode) => void;
+};
+
+export type StoredWalletSession = {
+  username: string;
+  credentialId: string;
+  credentialPublicKey: Hex;
+  rpId?: string;
+  address: Address;
 };
 
 function getClientEnv() {
@@ -62,6 +72,85 @@ function setStoredCredentialId(username: string, credentialId: string) {
   } catch {
     // storage unavailable
   }
+}
+
+export function getStoredWalletSession(): StoredWalletSession | null {
+  try {
+    const raw = window.localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    return parseStoredWalletSession(raw);
+  } catch {
+    clearStoredWalletSession();
+    return null;
+  }
+}
+
+export function storeWalletSession(session: ModularWalletSession) {
+  const stored: StoredWalletSession = {
+    username: session.identity.username,
+    credentialId: session.identity.credentialId,
+    credentialPublicKey: session.identity.credentialPublicKey,
+    rpId: session.identity.rpId,
+    address: session.address,
+  };
+
+  try {
+    window.localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, JSON.stringify(stored));
+    window.localStorage.setItem(LEGACY_ADDRESS_STORAGE_KEY, session.address);
+  } catch {
+    // storage unavailable
+  }
+}
+
+export function clearStoredWalletSession() {
+  try {
+    window.localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+    window.localStorage.removeItem(LEGACY_ADDRESS_STORAGE_KEY);
+  } catch {
+    // storage unavailable
+  }
+}
+
+function parseStoredWalletSession(raw: string): StoredWalletSession | null {
+  const parsed = JSON.parse(raw) as Partial<StoredWalletSession> | null;
+  if (!parsed || typeof parsed !== "object") {
+    clearStoredWalletSession();
+    return null;
+  }
+
+  const username = typeof parsed.username === "string" ? parsed.username.trim() : "";
+  const credentialId =
+    typeof parsed.credentialId === "string" ? parsed.credentialId.trim() : "";
+  const credentialPublicKey =
+    typeof parsed.credentialPublicKey === "string"
+      ? parsed.credentialPublicKey
+      : "";
+  const rpId =
+    typeof parsed.rpId === "string" && parsed.rpId.trim().length > 0
+      ? parsed.rpId.trim()
+      : undefined;
+
+  if (
+    !username ||
+    !credentialId ||
+    !isHex(credentialPublicKey) ||
+    !parsed.address ||
+    !isAddress(parsed.address)
+  ) {
+    clearStoredWalletSession();
+    return null;
+  }
+
+  return {
+    username,
+    credentialId,
+    credentialPublicKey,
+    rpId,
+    address: getAddress(parsed.address) as Address,
+  };
 }
 
 function clearStoredCredentialId(username: string) {
@@ -128,17 +217,53 @@ export async function initWallet(
 
   const { clientKey, clientUrl } = getClientEnv();
   const credential = await createOrLoginCredential(normalizedUsername, options);
+  return createWalletSession({
+    username: normalizedUsername,
+    clientKey,
+    clientUrl,
+    credentialId: credential.id,
+    credentialPublicKey: credential.publicKey,
+    rpId: credential.rpId,
+  });
+}
+
+export async function restoreWalletSession(stored: StoredWalletSession) {
+  const { clientKey, clientUrl } = getClientEnv();
+  const session = await createWalletSession({
+    username: stored.username,
+    clientKey,
+    clientUrl,
+    credentialId: stored.credentialId,
+    credentialPublicKey: stored.credentialPublicKey,
+    rpId: stored.rpId,
+  });
+
+  if (session.address !== stored.address) {
+    throw new Error("Stored wallet identity no longer matches the active wallet.");
+  }
+
+  return session;
+}
+
+async function createWalletSession(params: {
+  username: string;
+  clientKey: string;
+  clientUrl: string;
+  credentialId: string;
+  credentialPublicKey: Hex;
+  rpId?: string;
+}) {
   const owner = toWebAuthnAccount({
     credential: {
-      id: credential.id,
-      publicKey: credential.publicKey,
+      id: params.credentialId,
+      publicKey: params.credentialPublicKey,
     },
-    rpId: credential.rpId,
+    rpId: params.rpId,
   });
 
   const modularTransport = toModularTransport(
-    getChainClientUrl(clientUrl),
-    clientKey,
+    getChainClientUrl(params.clientUrl),
+    params.clientKey,
   );
   const publicClient = createPublicClient({
     chain: MODULAR_WALLET_CHAIN,
@@ -148,7 +273,7 @@ export async function initWallet(
   const smartAccount = await toCircleSmartAccount({
     client: publicClient,
     owner,
-    name: normalizedUsername,
+    name: params.username,
   });
 
   const bundlerClient = createBundlerClient({
@@ -164,9 +289,19 @@ export async function initWallet(
   return {
     smartAccount,
     bundlerClient,
-    address,
+    address: getAddress(address) as Address,
+    identity: {
+      username: params.username,
+      credentialId: params.credentialId,
+      credentialPublicKey: params.credentialPublicKey,
+      rpId: params.rpId,
+    },
   };
 }
 
 export type ModularWalletSession = Awaited<ReturnType<typeof initWallet>>;
 export type ModularSmartAccount = ToCircleSmartAccountReturnType;
+
+function isHex(value: string): value is Hex {
+  return /^0x[0-9a-fA-F]+$/.test(value);
+}

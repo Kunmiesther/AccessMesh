@@ -50,8 +50,7 @@ type PendingResourceRequest = Omit<CreateResourceRequest, "publishTxHash">;
 
 export function CreateResourcePage() {
   const router = useRouter();
-  const { connected, address, smartAccount, bundlerClient } = useWallet();
-  const [authReady, setAuthReady] = useState(false);
+  const { connected, ready, address, smartAccount, bundlerClient } = useWallet();
   const [state, setState] = useState<PublishState>({ status: "idle" });
   const [publishFeeConfig, setPublishFeeConfig] =
     useState<PublishFeeConfig | null>(null);
@@ -70,18 +69,13 @@ export function CreateResourcePage() {
   const [tags, setTags] = useState("");
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setAuthReady(true), 150);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
-    if (authReady && !connected) {
+    if (ready && !connected) {
       router.replace("/wallet?next=/create");
     }
-  }, [authReady, connected, router]);
+  }, [connected, ready, router]);
 
   useEffect(() => {
-    if (!authReady || !connected || !address) {
+    if (!ready || !connected || !address) {
       return;
     }
 
@@ -108,12 +102,12 @@ export function CreateResourcePage() {
     return () => {
       cancelled = true;
     };
-  }, [address, authReady, connected]);
+  }, [address, connected, ready]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!address) {
+    if (!connected || !address) {
       router.push("/wallet?next=/create");
       return;
     }
@@ -154,7 +148,7 @@ export function CreateResourcePage() {
   }
 
   async function handleConfirmPublish() {
-    if (!address) {
+    if (!connected || !address) {
       router.push("/wallet?next=/create");
       return;
     }
@@ -162,7 +156,8 @@ export function CreateResourcePage() {
     if (!smartAccount || !bundlerClient) {
       setState({
         status: "error",
-        message: "Reconnect your Circle Modular Wallet before publishing.",
+        message:
+          "Active wallet session is not available. Refresh and sign in again if the session has expired.",
       });
       return;
     }
@@ -256,7 +251,7 @@ export function CreateResourcePage() {
           )}
         </header>
 
-        {authReady && connected && address ? (
+        {ready && connected && address ? (
           <form onSubmit={handleSubmit} style={panelStyle}>
             <div style={gridStyle}>
               <Field label="Title" htmlFor="title" required>
@@ -454,12 +449,16 @@ export function CreateResourcePage() {
               </button>
             </div>
           </form>
-        ) : (
+        ) : ready && !connected ? (
           <section style={panelStyle}>
             <p style={bodyStyle}>Connect your authenticated wallet before publishing.</p>
             <Link href="/wallet?next=/create" style={{ ...primaryButtonStyle, marginTop: 16 }}>
               Connect Wallet
             </Link>
+          </section>
+        ) : (
+          <section style={panelStyle}>
+            <p style={bodyStyle}>Restoring authenticated wallet...</p>
           </section>
         )}
 
