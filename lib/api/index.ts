@@ -6,6 +6,7 @@ import type {
   PaymentInitiateRequest,
   PaymentInitiateResponse,
   PaymentVerifyResponse,
+  PublishFeeConfigResponse,
   ProtocolStatsResponse,
   PurchaseListResponse,
   RecentActivityResponse,
@@ -201,6 +202,10 @@ export async function postResource(
 
 export async function getProtocolStats(): Promise<ProtocolStatsResponse> {
   return apiFetch<ProtocolStatsResponse>("/api/protocol/stats");
+}
+
+export async function getPublishFeeConfig(): Promise<PublishFeeConfigResponse> {
+  return apiFetch<PublishFeeConfigResponse>("/api/protocol/publish-fee");
 }
 
 export async function getRecentActivity(): Promise<RecentActivityResponse> {

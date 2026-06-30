@@ -351,9 +351,21 @@ function PurchaseRow({
   purchase,
   showResourceLink = true,
 }: {
-  purchase: { id: string; resourceId: string; resourceTitle: string; creatorWallet: string; amountUSDC: number; txHash: string; timestamp: string };
+  purchase: {
+    id: string;
+    resourceId: string;
+    resourceTitle: string;
+    creatorWallet: string;
+    creatorDisplayName: string | null;
+    amountUSDC: number;
+    txHash: string;
+    timestamp: string;
+  };
   showResourceLink?: boolean;
 }) {
+  const creatorLabel =
+    purchase.creatorDisplayName?.trim() || shortAddress(purchase.creatorWallet);
+
   return (
     <div style={purchaseRowStyle}>
       <div style={{ minWidth: 0 }}>
@@ -363,7 +375,10 @@ function PurchaseRow({
           </Link>
           {showResourceLink && (
             <Link href={`/creator/${purchase.creatorWallet}`} style={creatorLinkStyle}>
-              {shortAddress(purchase.creatorWallet)}
+              {creatorLabel}
+              {purchase.creatorDisplayName?.trim()
+                ? ` ${shortAddress(purchase.creatorWallet)}`
+                : ""}
             </Link>
           )}
         </div>
@@ -403,14 +418,35 @@ function ActivityPanel({
 
 function ActivityRow({ entry }: { entry: RecentActivityEntry }) {
   const activityMeta = activityMetaMap[entry.type];
+  const creatorLabel =
+    entry.creatorDisplayName?.trim() || shortAddress(entry.creatorWallet);
+  const resourceTitle = entry.resourceTitle || entry.resourceName;
 
   return (
     <div style={activityRowStyle}>
       <div style={{ minWidth: 0 }}>
         <p style={activityTypeStyle}>{activityMeta.label}</p>
         <p style={activityTextStyle}>
-          <span style={walletStyle}>{shortAddress(entry.wallet)}</span>{" "}
-          {`${activityMeta.verb} "${entry.resourceTitle || entry.resourceName}"`}
+          {entry.type === "RESOURCE_PUBLISHED" ? (
+            <>
+              <CreatorActivityLink
+                wallet={entry.creatorWallet}
+                label={creatorLabel}
+                displayName={entry.creatorDisplayName}
+              />{" "}
+              {`published "${resourceTitle}"`}
+            </>
+          ) : (
+            <>
+              <span style={activityActorStyle}>{shortAddress(entry.wallet)}</span>{" "}
+              {`${activityMeta.verb} "${resourceTitle}" by `}
+              <CreatorActivityLink
+                wallet={entry.creatorWallet}
+                label={creatorLabel}
+                displayName={entry.creatorDisplayName}
+              />
+            </>
+          )}
         </p>
       </div>
       <div style={{ textAlign: "right" }}>
@@ -422,6 +458,23 @@ function ActivityRow({ entry }: { entry: RecentActivityEntry }) {
         <span style={timestampStyle}>{new Date(entry.createdAt).toLocaleDateString()}</span>
       </div>
     </div>
+  );
+}
+
+function CreatorActivityLink({
+  wallet,
+  label,
+  displayName,
+}: {
+  wallet: string;
+  label: string;
+  displayName: string | null;
+}) {
+  return (
+    <Link href={`/creator/${wallet}`} style={activityCreatorLinkStyle}>
+      {label}
+      {displayName?.trim() ? ` ${shortAddress(wallet)}` : ""}
+    </Link>
   );
 }
 
@@ -646,7 +699,13 @@ const activityTextStyle = {
   wordBreak: "break-word",
 } satisfies CSSProperties;
 
-const walletStyle = {
+const activityCreatorLinkStyle = {
+  fontFamily: "var(--font-mono)",
+  color: "var(--text-primary)",
+  textDecoration: "none",
+} satisfies CSSProperties;
+
+const activityActorStyle = {
   fontFamily: "var(--font-mono)",
   color: "var(--text-primary)",
 } satisfies CSSProperties;

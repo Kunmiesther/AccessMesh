@@ -23,7 +23,9 @@ export default async function CreatorProfilePage({ params }: Props) {
         <section style={heroStyle}>
           <div style={heroCopyStyle}>
             <p style={eyebrowStyle}>Creator profile</p>
-            <h1 style={titleStyle}>{profile.displayName}</h1>
+            {profile.displayName ? (
+              <h1 style={titleStyle}>{profile.displayName}</h1>
+            ) : null}
             <p style={walletStyle}>{profile.wallet}</p>
             <div style={actionRowStyle}>
               <WalletCopyButton

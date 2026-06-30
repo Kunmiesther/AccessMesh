@@ -1,16 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { ArcTestnet } from "@circle-fin/app-kit/chains";
-import {
-  encodeFunctionData,
-  erc20Abi,
-  parseUnits,
-  type Address,
-  type Hash,
-} from "viem";
+import { type Address, type Hash } from "viem";
 import { postUnlock } from "@/lib/api";
 import type { ModularWalletSession } from "@/lib/modular-wallet";
+import { executeUsdcPayment } from "@/lib/usdc-transfer";
 import type { PaymentIntent } from "@/types";
 
 type Props = {
@@ -49,10 +43,16 @@ export function PaymentIntentBox({
     try {
       const hash = await executeUsdcPayment({
         bundlerClient,
-        creatorWallet: intent.creatorWallet as Address,
-        treasuryWallet: intent.treasuryWallet as Address,
-        creatorAmountUSDC: intent.creatorAmountUSDC,
-        treasuryAmountUSDC: intent.treasuryAmountUSDC,
+        transfers: [
+          {
+            recipientWallet: intent.creatorWallet as Address,
+            amountUSDC: intent.creatorAmountUSDC,
+          },
+          {
+            recipientWallet: intent.treasuryWallet as Address,
+            amountUSDC: intent.treasuryAmountUSDC,
+          },
+        ],
       });
       setTxHash(hash);
 
@@ -281,58 +281,6 @@ export function PaymentIntentBox({
       )}
     </div>
   );
-}
-
-async function executeUsdcPayment(params: {
-  bundlerClient: ModularWalletSession["bundlerClient"];
-  creatorWallet: Address;
-  treasuryWallet: Address;
-  creatorAmountUSDC: number;
-  treasuryAmountUSDC: number;
-}) {
-  const userOpHash = await params.bundlerClient.sendUserOperation({
-    calls: buildTransferCalls(params),
-  });
-
-  const receipt = await params.bundlerClient.waitForUserOperationReceipt({
-    hash: userOpHash,
-    timeout: 120_000,
-  });
-
-  if (!receipt.success) {
-    throw new Error(receipt.reason ?? "USDC payment user operation reverted.");
-  }
-
-  return receipt.receipt.transactionHash;
-}
-
-function buildTransferCalls(params: {
-  creatorWallet: Address;
-  treasuryWallet: Address;
-  creatorAmountUSDC: number;
-  treasuryAmountUSDC: number;
-}) {
-  const calls = [
-    buildTransferCall(params.creatorWallet, params.creatorAmountUSDC),
-  ];
-
-  if (params.treasuryAmountUSDC > 0) {
-    calls.push(buildTransferCall(params.treasuryWallet, params.treasuryAmountUSDC));
-  }
-
-  return calls;
-}
-
-function buildTransferCall(recipientWallet: Address, amountUSDC: number) {
-  return {
-    to: ArcTestnet.usdcAddress as Address,
-    data: encodeFunctionData({
-      abi: erc20Abi,
-      functionName: "transfer",
-      args: [recipientWallet, parseUnits(amountUSDC.toString(), 6)],
-    }),
-    value: BigInt(0),
-  };
 }
 
 function ReceiptLine({

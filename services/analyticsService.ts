@@ -285,7 +285,7 @@ function resolveCreatorDisplayName(
     resource.creatorDisplayName?.trim().length,
   )?.creatorDisplayName;
 
-  return normalizeOptionalStoredText(firstDisplayName) ?? "Creator";
+  return normalizeOptionalStoredText(firstDisplayName) ?? null;
 }
 
 function normalizeOptionalStoredText(value: string | null | undefined) {
@@ -306,7 +306,14 @@ function mapActivityEntries(
     title: string;
     txHash: string | null;
     createdAt: Date;
-    resource: { type: string; category: string; title: string; name: string };
+    resource: {
+      type: string;
+      category: string;
+      title: string;
+      name: string;
+      creatorWallet: string;
+      creatorDisplayName: string | null;
+    };
   }>,
 ): RecentActivityEntry[] {
   return entries.map((entry) => ({
@@ -318,6 +325,8 @@ function mapActivityEntries(
     resourceTitle: entry.title || entry.resource.title || entry.resource.name,
     resourceName: entry.resource.title || entry.resource.name,
     resourceType: normalizeResourceType(entry.resource.type || entry.resource.category),
+    creatorWallet: entry.resource.creatorWallet,
+    creatorDisplayName: normalizeOptionalStoredText(entry.resource.creatorDisplayName) ?? null,
     txHash: entry.txHash,
     createdAt: entry.createdAt.toISOString(),
   }));

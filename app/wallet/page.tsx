@@ -4,6 +4,7 @@ import { FormEvent, Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Navbar } from "@/components/Navbar";
 import { useWallet } from "@/hooks/useWallet";
+import { getStoredCredentialMode, type PasskeyCredentialMode } from "@/lib/modular-wallet";
 
 function WalletPageContent() {
   const router = useRouter();
@@ -11,6 +12,7 @@ function WalletPageContent() {
   const { connectWallet, loading, error } = useWallet();
   const [username, setUsername] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [flowMode, setFlowMode] = useState<PasskeyCredentialMode | null>(null);
   const nextPath = searchParams.get("next") || "/dashboard";
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -23,11 +25,27 @@ function WalletPageContent() {
     }
 
     setFormError(null);
-    await connectWallet(trimmedUsername);
+    const storedMode = getStoredCredentialMode(trimmedUsername);
+    setFlowMode(storedMode);
+    await connectWallet(trimmedUsername, {
+      onCredentialMode: setFlowMode,
+    });
     router.push(nextPath.startsWith("/") ? nextPath : "/dashboard");
   }
 
   const visibleError = formError ?? error;
+  const flowMessage =
+    flowMode === "existing"
+      ? {
+          title: "Username already exists.",
+          body: "Continue with your existing passkey.",
+        }
+      : flowMode === "new"
+        ? {
+            title: "Creating a new AccessMesh identity.",
+            body: "A new passkey will be created.",
+          }
+        : null;
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
@@ -114,6 +132,7 @@ function WalletPageContent() {
               onChange={(event) => {
                 setUsername(event.target.value);
                 setFormError(null);
+                setFlowMode(null);
               }}
               placeholder="name@example.com"
               style={{
@@ -130,6 +149,38 @@ function WalletPageContent() {
                 marginBottom: 12,
               }}
             />
+
+            {flowMessage && (
+              <div
+                style={{
+                  border: "1px solid var(--border)",
+                  borderRadius: 4,
+                  padding: "10px 12px",
+                  marginBottom: 12,
+                  background: "#0a0a0a",
+                }}
+              >
+                <p
+                  style={{
+                    fontSize: 12,
+                    color: "var(--text-primary)",
+                    lineHeight: 1.5,
+                    marginBottom: 4,
+                  }}
+                >
+                  {flowMessage.title}
+                </p>
+                <p
+                  style={{
+                    fontSize: 12,
+                    color: "var(--text-secondary)",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {flowMessage.body}
+                </p>
+              </div>
+            )}
 
             {visibleError && (
               <p

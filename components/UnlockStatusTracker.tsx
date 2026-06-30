@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { ResourceMeta } from "@/types";
-import { appResourceUrl, arcExplorerTxUrl } from "@/lib/ui";
+import { appResourceUrl, arcExplorerTxUrl, shortAddress } from "@/lib/ui";
 
 type Props = {
   resource: ResourceMeta;
@@ -15,6 +15,8 @@ export function UnlockStatusTracker({ resource, txHash }: Props) {
   const resourceUrl = `/resource/${resource.id}`;
   const absoluteResourceUrl = appResourceUrl(resource.id);
   const explorerUrl = arcExplorerTxUrl(txHash);
+  const creatorLabel =
+    resource.creatorDisplayName?.trim() || shortAddress(resource.creatorWallet);
 
   useEffect(() => {
     if (!copied) {
@@ -120,7 +122,17 @@ export function UnlockStatusTracker({ resource, txHash }: Props) {
         </div>
 
         <div style={metaGridStyle}>
-          <MetaItem label="Creator" value={resource.creatorDisplayName ?? resource.creatorWallet} />
+          <MetaItem
+            label="Creator"
+            value={
+              <Link href={`/creator/${resource.creatorWallet}`} style={creatorLinkStyle}>
+                {creatorLabel}
+                {resource.creatorDisplayName?.trim()
+                  ? ` ${shortAddress(resource.creatorWallet)}`
+                  : ""}
+              </Link>
+            }
+          />
           <MetaItem label="Category" value={resource.resourceCategory ?? resource.category} />
           <MetaItem label="Price" value={`${resource.priceUSDC.toFixed(2)} USDC`} />
           <MetaItem label="Unlocks" value={String(resource.unlockCount)} />
@@ -130,7 +142,7 @@ export function UnlockStatusTracker({ resource, txHash }: Props) {
   );
 }
 
-function MetaItem({ label, value }: { label: string; value: string }) {
+function MetaItem({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div style={metaItemStyle}>
       <p style={labelStyle}>{label}</p>
@@ -203,6 +215,12 @@ const metaValueStyle = {
   fontFamily: "var(--font-mono)",
   overflowWrap: "anywhere",
   lineHeight: 1.5,
+} as const;
+
+const creatorLinkStyle = {
+  color: "var(--accent)",
+  textDecoration: "none",
+  overflowWrap: "anywhere",
 } as const;
 
 const titleStyle = {

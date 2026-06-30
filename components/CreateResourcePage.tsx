@@ -4,11 +4,17 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CSSProperties, ReactNode } from "react";
 import { FormEvent, useEffect, useState } from "react";
+import { type Address } from "viem";
 import { CoverImageUpload } from "@/components/CoverImageUpload";
 import { Navbar } from "@/components/Navbar";
-import { postResource } from "@/lib/api";
+import { getPublishFeeConfig, postResource } from "@/lib/api";
+import { executeUsdcPayment } from "@/lib/usdc-transfer";
 import { useWallet } from "@/lib/ui/WalletContext";
-import type { PublishedResourceType } from "@/types";
+import type {
+  CreateResourceRequest,
+  PublishedResourceType,
+  PublishFeeConfig,
+} from "@/types";
 
 const resourceTypeOptions: Array<{
   value: PublishedResourceType;
@@ -34,14 +40,24 @@ const resourceTypeOptions: Array<{
 
 type PublishState =
   | { status: "idle" }
-  | { status: "submitting" }
+  | { status: "preparing" }
+  | { status: "awaiting-confirmation" }
+  | { status: "paying" }
+  | { status: "publishing" }
   | { status: "error"; message: string };
+
+type PendingResourceRequest = Omit<CreateResourceRequest, "publishTxHash">;
 
 export function CreateResourcePage() {
   const router = useRouter();
-  const { connected, address } = useWallet();
+  const { connected, address, smartAccount, bundlerClient } = useWallet();
   const [authReady, setAuthReady] = useState(false);
   const [state, setState] = useState<PublishState>({ status: "idle" });
+  const [publishFeeConfig, setPublishFeeConfig] =
+    useState<PublishFeeConfig | null>(null);
+  const [pendingResource, setPendingResource] =
+    useState<PendingResourceRequest | null>(null);
+  const [creatorDisplayName, setCreatorDisplayName] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("");
@@ -64,6 +80,36 @@ export function CreateResourcePage() {
     }
   }, [authReady, connected, router]);
 
+  useEffect(() => {
+    if (!authReady || !connected || !address) {
+      return;
+    }
+
+    let cancelled = false;
+
+    getPublishFeeConfig()
+      .then((response) => {
+        if (!cancelled) {
+          setPublishFeeConfig(response.config);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setState({
+            status: "error",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Publish fee config could not be loaded.",
+          });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [address, authReady, connected]);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -72,7 +118,7 @@ export function CreateResourcePage() {
       return;
     }
 
-    setState({ status: "submitting" });
+    setState({ status: "preparing" });
 
     try {
       const coverImage = coverImageFile
@@ -85,17 +131,75 @@ export function CreateResourcePage() {
         externalUrl,
       });
 
+      setPendingResource({
+        creatorWallet: address,
+        creatorDisplayName,
+        title,
+        description,
+        category,
+        priceUSDC,
+        resourceType,
+        coverImage,
+        tags,
+        ...resourceData,
+      });
+      setState({ status: "awaiting-confirmation" });
+    } catch (error) {
+      setState({
+        status: "error",
+        message:
+          error instanceof Error ? error.message : "Resource could not be published.",
+      });
+    }
+  }
+
+  async function handleConfirmPublish() {
+    if (!address) {
+      router.push("/wallet?next=/create");
+      return;
+    }
+
+    if (!smartAccount || !bundlerClient) {
+      setState({
+        status: "error",
+        message: "Reconnect your Circle Modular Wallet before publishing.",
+      });
+      return;
+    }
+
+    if (!publishFeeConfig) {
+      setState({
+        status: "error",
+        message: "Publish fee config is not loaded.",
+      });
+      return;
+    }
+
+    if (!pendingResource) {
+      setState({
+        status: "error",
+        message: "Resource form data could not be prepared.",
+      });
+      return;
+    }
+
+    try {
+      setState({ status: "paying" });
+      const publishTxHash = await executeUsdcPayment({
+        bundlerClient,
+        transfers: [
+          {
+            recipientWallet: publishFeeConfig.treasuryWallet as Address,
+            amountUSDC: publishFeeConfig.publishFeeUSDC,
+          },
+        ],
+      });
+
+      setState({ status: "publishing" });
       const response = await postResource(
         {
-          creatorWallet: address,
-          title,
-          description,
-          category,
-          priceUSDC,
-          resourceType,
-          coverImage,
-          tags,
-          ...resourceData,
+          ...pendingResource,
+          publishTxHash,
         },
         { wallet: address },
       );
@@ -110,7 +214,20 @@ export function CreateResourcePage() {
     }
   }
 
-  const disabled = state.status === "submitting";
+  function handleCancelConfirmation() {
+    setPendingResource(null);
+    setState({ status: "idle" });
+  }
+
+  const disabled =
+    state.status === "preparing" ||
+    state.status === "paying" ||
+    state.status === "publishing";
+  const submitDisabled = disabled || !publishFeeConfig;
+  const confirmationOpen =
+    state.status === "awaiting-confirmation" ||
+    state.status === "paying" ||
+    state.status === "publishing";
   const activeResourceType = resourceTypeOptions.find(
     (option) => option.value === resourceType,
   );
@@ -149,6 +266,17 @@ export function CreateResourcePage() {
                   disabled={disabled}
                   onChange={(event) => setTitle(event.target.value)}
                   required
+                  style={inputStyle}
+                />
+              </Field>
+
+              <Field label="Creator display name" htmlFor="creatorDisplayName">
+                <input
+                  id="creatorDisplayName"
+                  value={creatorDisplayName}
+                  disabled={disabled}
+                  onChange={(event) => setCreatorDisplayName(event.target.value)}
+                  placeholder="Shown with your wallet address"
                   style={inputStyle}
                 />
               </Field>
@@ -310,15 +438,19 @@ export function CreateResourcePage() {
               </Link>
               <button
                 type="submit"
-                disabled={disabled}
+                disabled={submitDisabled}
                 style={{
                   ...primaryButtonStyle,
-                  background: disabled ? "var(--accent-dim)" : "var(--accent)",
-                  color: disabled ? "var(--text-secondary)" : "#000",
-                  cursor: disabled ? "wait" : "pointer",
+                  background: submitDisabled ? "var(--accent-dim)" : "var(--accent)",
+                  color: submitDisabled ? "var(--text-secondary)" : "#000",
+                  cursor: submitDisabled ? "wait" : "pointer",
                 }}
               >
-                {state.status === "submitting" ? "Publishing..." : "Publish"}
+                {state.status === "preparing"
+                  ? "Preparing..."
+                  : publishFeeConfig
+                    ? "Publish"
+                    : "Loading publish fee..."}
               </button>
             </div>
           </form>
@@ -329,6 +461,16 @@ export function CreateResourcePage() {
               Connect Wallet
             </Link>
           </section>
+        )}
+
+        {confirmationOpen && publishFeeConfig && (
+          <PublishConfirmationModal
+            feeUSDC={publishFeeConfig.publishFeeUSDC}
+            treasuryWallet={publishFeeConfig.treasuryWallet}
+            status={state.status}
+            onCancel={handleCancelConfirmation}
+            onConfirm={handleConfirmPublish}
+          />
         )}
       </main>
     </div>
@@ -353,6 +495,70 @@ function Field({
         {required ? <span style={{ color: "var(--accent)" }}> *</span> : null}
       </label>
       {children}
+    </div>
+  );
+}
+
+function PublishConfirmationModal({
+  feeUSDC,
+  treasuryWallet,
+  status,
+  onCancel,
+  onConfirm,
+}: {
+  feeUSDC: number;
+  treasuryWallet: string;
+  status: PublishState["status"];
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const busy = status === "paying" || status === "publishing";
+  const actionLabel =
+    status === "paying"
+      ? "Executing USDC transfer..."
+      : status === "publishing"
+        ? "Verifying and publishing..."
+        : "Pay fee and publish";
+
+  return (
+    <div style={modalOverlayStyle} role="dialog" aria-modal="true">
+      <section style={modalPanelStyle}>
+        <p style={eyebrowStyle}>Protocol fee</p>
+        <h2 style={modalTitleStyle}>Confirm publishing</h2>
+        <p style={bodyStyle}>
+          Publishing this resource requires a protocol fee of {feeUSDC} USDC.
+        </p>
+        <div style={resourceUrlBoxStyle}>
+          <p style={modalMetaLabelStyle}>Treasury wallet</p>
+          <p style={modalMetaValueStyle}>{treasuryWallet}</p>
+        </div>
+        <div style={actionsStyle}>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onCancel}
+            style={{
+              ...secondaryButtonStyle,
+              cursor: busy ? "wait" : "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onConfirm}
+            style={{
+              ...primaryButtonStyle,
+              background: busy ? "var(--accent-dim)" : "var(--accent)",
+              color: busy ? "var(--text-secondary)" : "#000",
+              cursor: busy ? "wait" : "pointer",
+            }}
+          >
+            {actionLabel}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
@@ -480,6 +686,18 @@ const messageStyle = {
   lineHeight: 1.6,
 } satisfies CSSProperties;
 
+const resourceUrlBoxStyle = {
+  background: "#0a0a0a",
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+  padding: 14,
+  color: "var(--text-secondary)",
+  fontFamily: "var(--font-mono)",
+  fontSize: 12,
+  lineHeight: 1.6,
+  overflowWrap: "anywhere",
+} satisfies CSSProperties;
+
 const actionsStyle = {
   display: "flex",
   justifyContent: "flex-end",
@@ -508,4 +726,44 @@ const secondaryButtonStyle = {
   background: "transparent",
   color: "var(--text-secondary)",
   border: "1px solid var(--border)",
+} satisfies CSSProperties;
+
+const modalOverlayStyle = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 50,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 20,
+  background: "rgba(0, 0, 0, 0.72)",
+} satisfies CSSProperties;
+
+const modalPanelStyle = {
+  width: "min(100%, 460px)",
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+  padding: 24,
+  boxShadow: "0 24px 80px rgba(0, 0, 0, 0.42)",
+} satisfies CSSProperties;
+
+const modalTitleStyle = {
+  fontSize: 22,
+  lineHeight: 1.25,
+  color: "var(--text-primary)",
+  marginBottom: 10,
+} satisfies CSSProperties;
+
+const modalMetaLabelStyle = {
+  fontSize: 10,
+  color: "var(--text-muted)",
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  marginBottom: 6,
+} satisfies CSSProperties;
+
+const modalMetaValueStyle = {
+  color: "var(--text-secondary)",
+  wordBreak: "break-all",
 } satisfies CSSProperties;

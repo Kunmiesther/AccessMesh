@@ -12,6 +12,7 @@ import {
 import {
   initWallet,
   type ModularWalletSession,
+  type WalletInitOptions,
 } from "@/lib/modular-wallet";
 import { getAddress, isAddress } from "viem";
 
@@ -22,7 +23,10 @@ type WalletContextValue = {
   connected: boolean;
   loading: boolean;
   error: string | null;
-  connectWallet: (username: string) => Promise<ModularWalletSession>;
+  connectWallet: (
+    username: string,
+    options?: WalletInitOptions,
+  ) => Promise<ModularWalletSession>;
   disconnect: () => void;
 };
 
@@ -64,12 +68,15 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const connectWallet = useCallback(async (username: string) => {
+  const connectWallet = useCallback(async (
+    username: string,
+    options: WalletInitOptions = {},
+  ) => {
     setLoading(true);
     setError(null);
 
     try {
-      const session = await initWallet(username);
+      const session = await initWallet(username, options);
       await restoreWalletIdentity(session.address);
       setAddress(session.address);
       setSmartAccount(session.smartAccount);

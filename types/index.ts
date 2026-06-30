@@ -27,6 +27,9 @@ export type ResourceMeta = {
   tags: string[];
   unlockCount: number;
   isActive: boolean;
+  publishTxHash: string | null;
+  publishFeeUSDC: number | null;
+  publishedAt: string | null;
   createdAt: string;
 };
 
@@ -43,6 +46,7 @@ export type PurchaseProof = {
   creatorWallet: string;
   amountUSDC: number;
   txHash: string;
+  creatorDisplayName: string | null;
   timestamp: string;
 };
 
@@ -188,6 +192,7 @@ export type CreateResourceRequest = {
   resourceUrl?: string;
   coverImage?: string;
   tags?: string[] | string;
+  publishTxHash: string;
 };
 
 export type CreateResourceResponse = {
@@ -205,6 +210,16 @@ export type ProtocolStats = {
 export type ProtocolStatsResponse = {
   ok: boolean;
   stats: ProtocolStats;
+};
+
+export type PublishFeeConfig = {
+  publishFeeUSDC: number;
+  treasuryWallet: string;
+};
+
+export type PublishFeeConfigResponse = {
+  ok: boolean;
+  config: PublishFeeConfig;
 };
 
 export type X402Accept = {
@@ -256,6 +271,8 @@ export type RecentActivityEntry = {
   resourceTitle: string;
   resourceName: string;
   resourceType: ResourceType;
+  creatorWallet: string;
+  creatorDisplayName: string | null;
   txHash: string | null;
   createdAt: string;
 };
@@ -289,7 +306,7 @@ export type CreatedResourceSummary = ResourceMeta & {
 
 export type CreatorProfile = {
   wallet: string;
-  displayName: string;
+  displayName: string | null;
   joinDate: string;
   resourcesPublished: number;
   revenueEarned: number;

@@ -19,11 +19,24 @@ export async function GET() {
       resourceType: normalizeResourceType(
         entry.resource.type || entry.resource.category,
       ),
+      creatorWallet: entry.resource.creatorWallet,
+      creatorDisplayName: normalizeOptionalStoredText(
+        entry.resource.creatorDisplayName,
+      ) ?? null,
       payerWallet: entry.wallet,
       txHash: entry.txHash,
       createdAt: entry.createdAt.toISOString(),
     })),
   });
+}
+
+function normalizeOptionalStoredText(value: string | null | undefined) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function normalizeResourceType(value: string) {

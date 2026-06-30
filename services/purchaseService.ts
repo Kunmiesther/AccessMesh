@@ -18,8 +18,20 @@ export async function listWalletPurchases(wallet: string) {
     resourceTitle: purchase.resource.title || purchase.resource.name,
     buyerWallet: purchase.buyerWallet,
     creatorWallet: purchase.creatorWallet,
+    creatorDisplayName: normalizeOptionalStoredText(
+      purchase.resource.creatorDisplayName,
+    ) ?? null,
     amountUSDC: purchase.amountUSDC,
     txHash: purchase.txHash,
     timestamp: purchase.createdAt.toISOString(),
   }));
+}
+
+function normalizeOptionalStoredText(value: string | null | undefined) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }

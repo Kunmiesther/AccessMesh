@@ -445,30 +445,33 @@ function ResourcePreviewCard({
     creatorDisplayName?: string | null;
   };
 }) {
+  const creatorLabel =
+    resource.creatorDisplayName?.trim() || shortAddress(resource.creatorWallet ?? "");
+
   return (
-    <Link
-      href={resource.href}
+    <article
       style={{
         display: "block",
         background: "var(--surface)",
         border: "1px solid var(--border)",
         borderRadius: 8,
         overflow: "hidden",
-        textDecoration: "none",
         color: "inherit",
       }}
     >
-      <img
-        src={resource.image}
-        alt=""
-        aria-hidden="true"
-        style={{
-          width: "100%",
-          height: 150,
-          objectFit: "cover",
-          display: "block",
-        }}
-      />
+      <Link href={resource.href} style={{ display: "block", textDecoration: "none" }}>
+        <img
+          src={resource.image}
+          alt=""
+          aria-hidden="true"
+          style={{
+            width: "100%",
+            height: 150,
+            objectFit: "cover",
+            display: "block",
+          }}
+        />
+      </Link>
       <div style={{ padding: 16 }}>
         <p
           style={{
@@ -480,30 +483,39 @@ function ResourcePreviewCard({
         >
           {resource.type}
         </p>
-        <h3
+        <Link
+          href={resource.href}
           style={{
+            display: "inline-block",
             fontSize: 16,
             fontWeight: 600,
             color: "var(--text-primary)",
             marginBottom: 8,
+            textDecoration: "none",
           }}
         >
           {resource.name}
-        </h3>
+        </Link>
         <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6 }}>
           {resource.description}
         </p>
         {resource.creatorWallet && (
-          <p
+          <Link
+            href={`/creator/${resource.creatorWallet}`}
             style={{
+              display: "inline-block",
               marginTop: 12,
               fontFamily: "var(--font-mono)",
               fontSize: 12,
               color: "var(--text-muted)",
+              textDecoration: "none",
             }}
           >
-            {resource.creatorDisplayName ?? shortAddress(resource.creatorWallet)}
-          </p>
+            {creatorLabel}
+            {resource.creatorDisplayName?.trim()
+              ? ` ${shortAddress(resource.creatorWallet)}`
+              : ""}
+          </Link>
         )}
         {typeof resource.priceUSDC === "number" && (
           <p
@@ -518,12 +530,15 @@ function ResourcePreviewCard({
           </p>
         )}
       </div>
-    </Link>
+    </article>
   );
 }
 
 function ActivityRow({ entry }: { entry: RecentActivityEntry }) {
   const activityMeta = activityMetaMap[entry.type];
+  const creatorLabel =
+    entry.creatorDisplayName?.trim() || shortAddress(entry.creatorWallet);
+  const resourceTitle = entry.resourceTitle || entry.resourceName;
 
   return (
     <div
@@ -549,10 +564,28 @@ function ActivityRow({ entry }: { entry: RecentActivityEntry }) {
           {activityMeta.label}
         </p>
         <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5 }}>
-          <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
-            {shortAddress(entry.wallet)}
-          </span>{" "}
-          {`${activityMeta.verb} "${entry.resourceTitle || entry.resourceName}"`}
+          {entry.type === "RESOURCE_PUBLISHED" ? (
+            <>
+              <CreatorActivityLink
+                wallet={entry.creatorWallet}
+                label={creatorLabel}
+                displayName={entry.creatorDisplayName}
+              />{" "}
+              {`published "${resourceTitle}"`}
+            </>
+          ) : (
+            <>
+              <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+                {shortAddress(entry.wallet)}
+              </span>{" "}
+              {`${activityMeta.verb} "${resourceTitle}" by `}
+              <CreatorActivityLink
+                wallet={entry.creatorWallet}
+                label={creatorLabel}
+                displayName={entry.creatorDisplayName}
+              />
+            </>
+          )}
         </p>
       </div>
       <div style={{ textAlign: "right" }}>
@@ -585,6 +618,30 @@ function ActivityRow({ entry }: { entry: RecentActivityEntry }) {
         </span>
       </div>
     </div>
+  );
+}
+
+function CreatorActivityLink({
+  wallet,
+  label,
+  displayName,
+}: {
+  wallet: string;
+  label: string;
+  displayName: string | null;
+}) {
+  return (
+    <Link
+      href={`/creator/${wallet}`}
+      style={{
+        fontFamily: "var(--font-mono)",
+        color: "var(--text-primary)",
+        textDecoration: "none",
+      }}
+    >
+      {label}
+      {displayName?.trim() ? ` ${shortAddress(wallet)}` : ""}
+    </Link>
   );
 }
 

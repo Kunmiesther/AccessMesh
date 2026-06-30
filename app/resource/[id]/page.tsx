@@ -6,7 +6,13 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Navbar } from "@/components/Navbar";
 import { getProtectedResource } from "@/lib/api";
-import { appResourceUrl, formatDate, formatUSDC, shortAddress } from "@/lib/ui";
+import {
+  appResourceUrl,
+  arcExplorerTxUrl,
+  formatDate,
+  formatUSDC,
+  shortAddress,
+} from "@/lib/ui";
 import { useWallet } from "@/lib/ui/WalletContext";
 import type { PublishedResourceType, ResourceDetail } from "@/types";
 
@@ -145,7 +151,11 @@ function ResourceHeader({ resource }: { resource: ResourceDetail }) {
               value={
                 <Link href={`/creator/${resource.creatorWallet}`} style={creatorLinkStyle}>
                   <span>{creatorLabel}</span>
-                  <span style={creatorWalletStyle}>{shortAddress(resource.creatorWallet)}</span>
+                  {resource.creatorDisplayName?.trim().length ? (
+                    <span style={creatorWalletStyle}>
+                      {shortAddress(resource.creatorWallet)}
+                    </span>
+                  ) : null}
                 </Link>
               }
             />
@@ -153,6 +163,21 @@ function ResourceHeader({ resource }: { resource: ResourceDetail }) {
             <MetaItem label="Publish date" value={formatDate(resource.createdAt)} />
             <MetaItem label="Price" value={formatUSDC(resource.priceUSDC)} />
             <MetaItem label="Unlock count" value={String(resource.unlockCount)} />
+            {resource.publishTxHash ? (
+              <MetaItem
+                label="Published on Arc"
+                value={
+                  <a
+                    href={arcExplorerTxUrl(resource.publishTxHash)}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={txLinkStyle}
+                  >
+                    Publish Tx: {shortAddress(resource.publishTxHash)}
+                  </a>
+                }
+              />
+            ) : null}
           </div>
 
           <ResourceActionBar resource={resource} />
@@ -778,6 +803,12 @@ const creatorLinkStyle = {
 
 const creatorWalletStyle = {
   color: "var(--text-secondary)",
+} satisfies CSSProperties;
+
+const txLinkStyle = {
+  color: "var(--accent)",
+  textDecoration: "none",
+  wordBreak: "break-all",
 } satisfies CSSProperties;
 
 const previewStyle = {

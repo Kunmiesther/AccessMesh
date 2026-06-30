@@ -36,6 +36,9 @@ model Resource {
   tags           String   @default("[]")
   unlockCount    Int      @default(0)
   isActive       Boolean  @default(true)
+  publishTxHash  String?  @unique
+  publishFeeUSDC Float?
+  publishedAt    DateTime?
   createdAt      DateTime @default(now())
 
   owner          User     @relation(fields: [ownerId], references: [id])
@@ -46,6 +49,7 @@ model Resource {
 
   @@index([creatorWallet])
   @@index([createdAt])
+  @@index([publishedAt])
 }
 
 model Payment {

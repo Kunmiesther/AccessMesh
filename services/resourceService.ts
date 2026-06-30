@@ -7,6 +7,7 @@ import {
 } from "@/lib/validation";
 import { ActivityType, recordActivity } from "@/services/activityService";
 import { getTreasuryWallet, splitUsdcAmount } from "@/services/paymentSplit";
+import { verifyPublishFeePayment } from "@/services/publishingFeeService";
 import type {
   CreateResourceRequest,
   PublishedResourceType,
@@ -44,6 +45,27 @@ export async function createResource(input: CreateResourceRequest) {
   );
   const coverImage = normalizeOptionalText(input.coverImage);
   const tags = normalizeTags(input.tags);
+  const publishFeePayment = await verifyPublishFeePayment({
+    txHash: input.publishTxHash,
+    creatorWallet,
+  }).catch((error: unknown) => {
+    if (error instanceof InputError) {
+      throw error;
+    }
+
+    throw new InputError(
+      error instanceof Error
+        ? `publish fee verification failed: ${error.message}`
+        : "publish fee verification failed",
+    );
+  });
+
+  if (publishFeePayment.verification.status !== "SETTLED") {
+    throw new InputError(
+      publishFeePayment.verification.reason ||
+        "publish fee transaction has not settled on Arc",
+    );
+  }
 
   const owner = await prisma.user.upsert({
     where: { walletAddress: creatorWallet },
@@ -76,6 +98,9 @@ export async function createResource(input: CreateResourceRequest) {
       tags: JSON.stringify(tags),
       unlockCount: 0,
       isActive: true,
+      publishTxHash: publishFeePayment.txHash,
+      publishFeeUSDC: publishFeePayment.publishFeeUSDC,
+      publishedAt: new Date(),
     },
   });
 
@@ -84,6 +109,7 @@ export async function createResource(input: CreateResourceRequest) {
     wallet: creatorWallet,
     resourceId: resource.id,
     title: resource.title || resource.name,
+    txHash: publishFeePayment.txHash,
   }).catch(() => undefined);
 
   return serializeResource(resource);
@@ -240,6 +266,9 @@ export function serializeResource(resource: ResourceRecord): ResourceMeta {
     tags: parseStoredTags(resource.tags),
     unlockCount: resource.unlockCount,
     isActive: resource.isActive,
+    publishTxHash: resource.publishTxHash,
+    publishFeeUSDC: resource.publishFeeUSDC,
+    publishedAt: resource.publishedAt?.toISOString() ?? null,
     createdAt: resource.createdAt.toISOString(),
   };
 }

@@ -457,6 +457,7 @@ async function settlePayment(params: {
         resourceTitle: resource.title || resource.name,
         buyerWallet: purchase.buyerWallet,
         creatorWallet: purchase.creatorWallet,
+        creatorDisplayName: normalizeOptionalStoredText(resource.creatorDisplayName) ?? null,
         amountUSDC: purchase.amountUSDC,
         txHash: purchase.txHash,
         timestamp: purchase.createdAt.toISOString(),
@@ -587,6 +588,15 @@ function getErrorMessage(error: unknown) {
   }
 
   return "unknown verification error";
+}
+
+function normalizeOptionalStoredText(value: string | null | undefined) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function buildPaymentTransfers(params: {
