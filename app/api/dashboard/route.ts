@@ -9,6 +9,7 @@ import {
   getRecentUnlocks,
   getProtocolStats,
 } from "@/services/analyticsService";
+import { listWalletBridgeActivity } from "@/services/cctpBridgeService";
 import { listWalletPurchases } from "@/services/purchaseService";
 
 export const runtime = "nodejs";
@@ -31,6 +32,7 @@ export async function GET(request: Request) {
       protocolActivity,
       recentUnlocks,
       recentPublications,
+      crossChainActivity,
     ] = await Promise.all([
       getProtocolStats(),
       getCreatorAnalytics(wallet),
@@ -39,6 +41,7 @@ export async function GET(request: Request) {
       getRecentProtocolActivity(12),
       getRecentUnlocks(8),
       getRecentPublications(8),
+      listWalletBridgeActivity(wallet, 20),
     ]);
 
     return NextResponse.json({
@@ -48,6 +51,7 @@ export async function GET(request: Request) {
       purchasedResources,
       createdResources,
       paymentHistory: purchasedResources,
+      crossChainActivity,
       protocolActivity,
       recentUnlocks,
       recentPublications,

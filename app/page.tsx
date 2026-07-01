@@ -25,6 +25,12 @@ const EMPTY_STATS: ProtocolStats = {
   totalUnlocks: 0,
   totalUSDCVolume: 0,
   totalCreators: 0,
+  bridges: {
+    totalBridgedVolume: 0,
+    numberOfBridges: 0,
+    successfulBridges: 0,
+    failedBridges: 0,
+  },
 };
 
 export default function LandingPage() {
@@ -575,6 +581,15 @@ function ActivityRow({ entry }: { entry: RecentActivityEntry }) {
               />{" "}
               {`published "${resourceTitle}"`}
             </>
+          ) : entry.type === "BRIDGE_STARTED" ||
+            entry.type === "BRIDGE_COMPLETED" ||
+            entry.type === "BRIDGE_FAILED" ? (
+            <>
+              <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+                {shortAddress(entry.wallet)}
+              </span>{" "}
+              {`${activityMeta.verb} "${resourceTitle}"`}
+            </>
           ) : (
             <>
               <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
@@ -662,6 +677,18 @@ const activityMetaMap: Record<
   PROTECTED_RESOURCE_ACCESSED: {
     label: "Protected Resource Accessed",
     verb: "accessed",
+  },
+  BRIDGE_STARTED: {
+    label: "Bridge Started",
+    verb: "started bridging for",
+  },
+  BRIDGE_COMPLETED: {
+    label: "Bridge Completed",
+    verb: "completed bridge for",
+  },
+  BRIDGE_FAILED: {
+    label: "Bridge Failed",
+    verb: "failed bridge for",
   },
 };
 

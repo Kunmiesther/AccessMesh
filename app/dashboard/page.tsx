@@ -9,6 +9,7 @@ import { arcExplorerTxUrl, formatDate, formatUSDC, shortAddress } from "@/lib/ui
 import { useWallet } from "@/lib/ui/WalletContext";
 import type {
   ActivityEventType,
+  BridgeActivityEntry,
   CreatorAnalytics,
   DashboardResponse,
   ProtocolStats,
@@ -20,6 +21,12 @@ const EMPTY_STATS: ProtocolStats = {
   totalUnlocks: 0,
   totalUSDCVolume: 0,
   totalCreators: 0,
+  bridges: {
+    totalBridgedVolume: 0,
+    numberOfBridges: 0,
+    successfulBridges: 0,
+    failedBridges: 0,
+  },
 };
 
 const EMPTY_ANALYTICS: CreatorAnalytics = {
@@ -157,6 +164,22 @@ export default function DashboardPage() {
                 <StatCard label="Total Unlocks" value={stats.totalUnlocks} />
                 <StatCard label="Total Volume" value={formatUSDC(stats.totalUSDCVolume)} />
                 <StatCard label="Total Creators" value={stats.totalCreators} />
+                <StatCard
+                  label="Bridged Volume"
+                  value={formatUSDC(stats.bridges.totalBridgedVolume)}
+                />
+                <StatCard
+                  label="Bridge Count"
+                  value={stats.bridges.numberOfBridges}
+                />
+                <StatCard
+                  label="Successful Bridges"
+                  value={stats.bridges.successfulBridges}
+                />
+                <StatCard
+                  label="Failed Bridges"
+                  value={stats.bridges.failedBridges}
+                />
               </div>
             </section>
 
@@ -267,6 +290,28 @@ export default function DashboardPage() {
               ) : (
                 <section style={emptyStateStyle}>
                   <p style={emptyFeedTextStyle}>No payment history yet.</p>
+                </section>
+              )}
+            </section>
+
+            <section style={sectionStyle}>
+              <SectionHeader eyebrow="Cross-chain activity" title="CCTP bridge history" />
+              {dashboard.crossChainActivity.length > 0 ? (
+                <div style={bridgeTableStyle}>
+                  <div style={bridgeHeaderStyle}>
+                    {["Route", "Amount", "Status", "Timestamp"].map((label) => (
+                      <span key={label} style={bridgeHeaderCellStyle}>
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                  {dashboard.crossChainActivity.map((entry) => (
+                    <BridgeRow key={entry.id} entry={entry} />
+                  ))}
+                </div>
+              ) : (
+                <section style={emptyStateStyle}>
+                  <p style={emptyFeedTextStyle}>No cross-chain activity yet.</p>
                 </section>
               )}
             </section>
@@ -406,6 +451,47 @@ function PurchaseRow({
   );
 }
 
+function BridgeRow({ entry }: { entry: BridgeActivityEntry }) {
+  const txHash = entry.destinationTxHash ?? entry.sourceTxHash;
+
+  return (
+    <div style={bridgeRowStyle}>
+      <div style={{ minWidth: 0 }}>
+        <p style={bridgeRouteStyle}>
+          {entry.sourceChain} to {entry.destinationChain}
+        </p>
+        <Link href={`/resource/${entry.resourceId}`} style={bridgeResourceStyle}>
+          {entry.resourceTitle}
+        </Link>
+        {entry.errorMessage ? (
+          <p style={bridgeErrorStyle}>{entry.errorMessage}</p>
+        ) : null}
+      </div>
+      <span style={bridgeAmountStyle}>{formatUSDC(entry.amountUSDC)}</span>
+      <span style={{ ...bridgeStatusStyle, color: getBridgeStatusColor(entry.status) }}>
+        <span
+          style={{
+            width: 5,
+            height: 5,
+            borderRadius: "50%",
+            background: getBridgeStatusColor(entry.status),
+            flexShrink: 0,
+          }}
+        />
+        {normaliseBridgeStatus(entry.status)}
+      </span>
+      <div style={{ textAlign: "right" }}>
+        {txHash ? (
+          <a href={arcExplorerTxUrl(txHash)} target="_blank" rel="noreferrer" style={txLinkStyle}>
+            {shortAddress(txHash)}
+          </a>
+        ) : null}
+        <span style={timestampStyle}>{formatDate(entry.timestamp)}</span>
+      </div>
+    </div>
+  );
+}
+
 function ActivityPanel({
   eyebrow,
   title,
@@ -448,6 +534,13 @@ function ActivityRow({ entry }: { entry: RecentActivityEntry }) {
                 displayName={entry.creatorDisplayName}
               />{" "}
               {`published "${resourceTitle}"`}
+            </>
+          ) : entry.type === "BRIDGE_STARTED" ||
+            entry.type === "BRIDGE_COMPLETED" ||
+            entry.type === "BRIDGE_FAILED" ? (
+            <>
+              <span style={activityActorStyle}>{shortAddress(entry.wallet)}</span>{" "}
+              {`${activityMeta.verb} "${resourceTitle}"`}
             </>
           ) : (
             <>
@@ -504,7 +597,35 @@ const activityMetaMap: Record<ActivityEventType, { label: string; verb: string }
     label: "Protected Resource Accessed",
     verb: "accessed",
   },
+  BRIDGE_STARTED: {
+    label: "Bridge Started",
+    verb: "started bridging for",
+  },
+  BRIDGE_COMPLETED: {
+    label: "Bridge Completed",
+    verb: "completed bridge for",
+  },
+  BRIDGE_FAILED: {
+    label: "Bridge Failed",
+    verb: "failed bridge for",
+  },
 };
+
+function getBridgeStatusColor(status: BridgeActivityEntry["status"]) {
+  if (status === "COMPLETED") {
+    return "var(--success)";
+  }
+
+  if (status === "FAILED") {
+    return "var(--error)";
+  }
+
+  return "var(--accent)";
+}
+
+function normaliseBridgeStatus(status: BridgeActivityEntry["status"]) {
+  return status.toLowerCase();
+}
 
 const sectionStyle = {
   marginBottom: 28,
@@ -686,6 +807,79 @@ const feedStyle = {
   border: "1px solid var(--border)",
   borderRadius: 8,
   overflow: "hidden",
+} satisfies CSSProperties;
+
+const bridgeTableStyle = {
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+  overflow: "hidden",
+  overflowX: "auto",
+} satisfies CSSProperties;
+
+const bridgeHeaderStyle = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.5fr) 140px 140px 180px",
+  minWidth: 720,
+  gap: 14,
+  padding: "10px 18px",
+  borderBottom: "1px solid var(--border)",
+} satisfies CSSProperties;
+
+const bridgeHeaderCellStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 11,
+  color: "var(--text-muted)",
+  textTransform: "uppercase",
+  letterSpacing: "0.06em",
+} satisfies CSSProperties;
+
+const bridgeRowStyle = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.5fr) 140px 140px 180px",
+  minWidth: 720,
+  gap: 14,
+  alignItems: "center",
+  padding: "14px 18px",
+  borderBottom: "1px solid var(--border-subtle)",
+} satisfies CSSProperties;
+
+const bridgeRouteStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 12,
+  color: "var(--text-primary)",
+  marginBottom: 5,
+} satisfies CSSProperties;
+
+const bridgeResourceStyle = {
+  fontSize: 12,
+  color: "var(--text-secondary)",
+  textDecoration: "none",
+  lineHeight: 1.5,
+  wordBreak: "break-word",
+} satisfies CSSProperties;
+
+const bridgeAmountStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 12,
+  color: "var(--text-secondary)",
+} satisfies CSSProperties;
+
+const bridgeStatusStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 11,
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
+} satisfies CSSProperties;
+
+const bridgeErrorStyle = {
+  marginTop: 6,
+  fontSize: 12,
+  color: "var(--error)",
+  lineHeight: 1.5,
 } satisfies CSSProperties;
 
 const activityRowStyle = {

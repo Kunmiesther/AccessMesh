@@ -5,6 +5,7 @@ import {
   listRecentActivity,
   listRecentActivityByType,
 } from "@/services/activityService";
+import { getBridgeAnalytics } from "@/services/cctpBridgeService";
 import { serializeResource } from "@/services/resourceService";
 import { getX402Analytics } from "@/services/x402AccessService";
 import type {
@@ -18,7 +19,7 @@ import type {
 const CREATOR_REVENUE_SHARE = 0.95;
 
 export async function getProtocolStats(): Promise<ProtocolStats> {
-  const [totalResources, purchases, settledPayments, creators] =
+  const [totalResources, purchases, settledPayments, creators, bridges] =
     await Promise.all([
       prisma.resource.count({ where: { isActive: true } }),
       prisma.purchase.findMany({
@@ -38,6 +39,7 @@ export async function getProtocolStats(): Promise<ProtocolStats> {
         select: { creatorWallet: true },
         distinct: ["creatorWallet"],
       }),
+      getBridgeAnalytics(),
     ]);
 
   const purchaseTxHashes = new Set(purchases.map((purchase) => purchase.txHash));
@@ -54,6 +56,7 @@ export async function getProtocolStats(): Promise<ProtocolStats> {
     totalUnlocks,
     totalUSDCVolume,
     totalCreators: creators.length,
+    bridges,
   };
 }
 
@@ -336,7 +339,10 @@ function normalizeActivityType(value: string) {
   if (
     value === "RESOURCE_PUBLISHED" ||
     value === "RESOURCE_UNLOCKED" ||
-    value === "PROTECTED_RESOURCE_ACCESSED"
+    value === "PROTECTED_RESOURCE_ACCESSED" ||
+    value === "BRIDGE_STARTED" ||
+    value === "BRIDGE_COMPLETED" ||
+    value === "BRIDGE_FAILED"
   ) {
     return value;
   }

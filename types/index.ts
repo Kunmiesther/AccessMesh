@@ -4,7 +4,10 @@ export type PublishedResourceType = "ARTICLE" | "FILE_UPLOAD" | "EXTERNAL_LINK";
 export type ActivityEventType =
   | "RESOURCE_PUBLISHED"
   | "RESOURCE_UNLOCKED"
-  | "PROTECTED_RESOURCE_ACCESSED";
+  | "PROTECTED_RESOURCE_ACCESSED"
+  | "BRIDGE_STARTED"
+  | "BRIDGE_COMPLETED"
+  | "BRIDGE_FAILED";
 
 export type SortMode = "newest" | "price-asc" | "price-desc";
 
@@ -205,6 +208,7 @@ export type ProtocolStats = {
   totalUnlocks: number;
   totalUSDCVolume: number;
   totalCreators: number;
+  bridges: BridgeAnalytics;
 };
 
 export type ProtocolStatsResponse = {
@@ -282,6 +286,33 @@ export type RecentActivityResponse = {
   activity: RecentActivityEntry[];
 };
 
+export type BridgeStatus = "STARTED" | "COMPLETED" | "FAILED";
+
+export type BridgeActivityEntry = {
+  id: string;
+  resourceId: string;
+  resourceTitle: string;
+  payerWallet: string;
+  sourceWallet: string;
+  sourceChain: string;
+  destinationChain: string;
+  amountUSDC: number;
+  feeUSDC: number | null;
+  totalBurnUSDC: number | null;
+  sourceTxHash: string | null;
+  destinationTxHash: string | null;
+  status: BridgeStatus;
+  errorMessage: string | null;
+  timestamp: string;
+};
+
+export type BridgeAnalytics = {
+  totalBridgedVolume: number;
+  numberOfBridges: number;
+  successfulBridges: number;
+  failedBridges: number;
+};
+
 export type CreatorAnalytics = {
   revenueEarned: number;
   resourcesPublished: number;
@@ -327,9 +358,49 @@ export type DashboardResponse = {
   purchasedResources: PurchaseProof[];
   createdResources: CreatedResourceSummary[];
   paymentHistory: PurchaseProof[];
+  crossChainActivity: BridgeActivityEntry[];
   protocolActivity: RecentActivityEntry[];
   recentUnlocks: RecentActivityEntry[];
   recentPublications: RecentActivityEntry[];
+};
+
+export type CctpBridgeRecordRequest =
+  | {
+      event: "started";
+      resourceId: string;
+      payerWallet: string;
+      sourceWallet: string;
+      sourceChain: {
+        name: string;
+        chainId: number;
+        domain: number;
+      };
+      destinationChain: {
+        name: string;
+        chainId: number;
+        domain: number;
+      };
+      amountUSDC: number;
+      feeUSDC?: number | null;
+      totalBurnUSDC?: number | null;
+      sourceTxHash: string;
+    }
+  | {
+      event: "completed";
+      sourceTxHash: string;
+      destinationTxHash: string;
+      payerWallet: string;
+    }
+  | {
+      event: "failed";
+      sourceTxHash: string;
+      payerWallet: string;
+      errorMessage: string;
+    };
+
+export type CctpBridgeRecordResponse = {
+  ok: boolean;
+  bridge: BridgeActivityEntry;
 };
 
 export type UnlockInitiateResponse = {

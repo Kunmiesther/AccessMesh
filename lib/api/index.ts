@@ -1,5 +1,7 @@
 import type {
   AccessIntentResponse,
+  CctpBridgeRecordRequest,
+  CctpBridgeRecordResponse,
   ProtectedResourceResponse,
   DashboardResponse,
   LedgerResponse,
@@ -73,6 +75,20 @@ export async function postUnlock(
   opts?: { wallet?: string },
 ): Promise<UnlockResponse> {
   return apiFetch<UnlockResponse>("/api/access/unlock", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(opts?.wallet ? { "x-wallet-address": opts.wallet } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function postCctpBridgeEvent(
+  body: CctpBridgeRecordRequest,
+  opts?: { wallet?: string },
+): Promise<CctpBridgeRecordResponse> {
+  return apiFetch<CctpBridgeRecordResponse>("/api/cctp/bridge", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

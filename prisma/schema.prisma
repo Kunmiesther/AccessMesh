@@ -46,6 +46,7 @@ model Resource {
   purchases      Purchase[]
   activityEvents ActivityEvent[]
   x402AccessLogs X402AccessLog[]
+  cctpBridges    CctpBridge[]
 
   @@index([creatorWallet])
   @@index([createdAt])
@@ -98,7 +99,7 @@ model AccessLog {
 
 model ActivityEvent {
   id        String   @id @default(cuid())
-  type      String   // RESOURCE_PUBLISHED | RESOURCE_UNLOCKED | PROTECTED_RESOURCE_ACCESSED
+  type      String   // RESOURCE_PUBLISHED | RESOURCE_UNLOCKED | PROTECTED_RESOURCE_ACCESSED | BRIDGE_STARTED | BRIDGE_COMPLETED | BRIDGE_FAILED
   wallet    String
   resourceId String
   title     String
@@ -110,6 +111,36 @@ model ActivityEvent {
   @@index([createdAt])
   @@index([wallet])
   @@index([resourceId])
+}
+
+model CctpBridge {
+  id                String   @id @default(cuid())
+  resourceId        String
+  payerWallet       String
+  sourceWallet      String
+  sourceChain       String
+  sourceChainId     Int
+  sourceDomain      Int
+  destinationChain  String
+  destinationChainId Int
+  destinationDomain Int
+  amountUSDC        Float
+  feeUSDC           Float?
+  totalBurnUSDC     Float?
+  sourceTxHash      String?  @unique
+  destinationTxHash String?
+  status            String   // STARTED | COMPLETED | FAILED
+  errorMessage      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  resource          Resource @relation(fields: [resourceId], references: [id])
+
+  @@index([payerWallet])
+  @@index([sourceWallet])
+  @@index([resourceId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model X402AccessLog {

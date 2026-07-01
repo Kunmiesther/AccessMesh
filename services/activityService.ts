@@ -5,6 +5,9 @@ export const ActivityType = {
   ResourcePublished: "RESOURCE_PUBLISHED",
   ResourceUnlocked: "RESOURCE_UNLOCKED",
   ProtectedResourceAccessed: "PROTECTED_RESOURCE_ACCESSED",
+  BridgeStarted: "BRIDGE_STARTED",
+  BridgeCompleted: "BRIDGE_COMPLETED",
+  BridgeFailed: "BRIDGE_FAILED",
 } as const;
 
 export type ActivityTypeValue = (typeof ActivityType)[keyof typeof ActivityType];
