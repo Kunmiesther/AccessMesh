@@ -52,6 +52,8 @@ type PublishState =
 
 type PendingResourceRequest = Omit<CreateResourceRequest, "publishTxHash">;
 
+const PUBLISH_PAYMENT_CONFIRMATION_TIMEOUT_MS = 120_000;
+
 export function CreateResourcePage() {
   const router = useRouter();
   const { connected, ready, address, smartAccount, bundlerClient } = useWallet();
@@ -90,6 +92,7 @@ export function CreateResourcePage() {
     getPublishFeeConfig()
       .then((response) => {
         if (!cancelled) {
+          console.info("[publish] fee config loaded");
           setPublishFeeConfig(response.config);
         }
       })
@@ -188,6 +191,7 @@ export function CreateResourcePage() {
     try {
       setState({ status: "paying" });
       setPublishUserOpHash(null);
+      console.info("[publish] sending publish fee");
       const userOpHash = await submitUsdcPayment({
         bundlerClient,
         transfers: [
@@ -198,14 +202,18 @@ export function CreateResourcePage() {
         ],
       });
 
+      console.info("[publish] userOp hash received", userOpHash);
       setPublishUserOpHash(userOpHash);
+      console.info("[publish] waiting for receipt");
 
       const confirmation = await confirmUsdcPayment({
         bundlerClient,
         userOpHash,
+        timeoutMs: PUBLISH_PAYMENT_CONFIRMATION_TIMEOUT_MS,
       });
 
       if (confirmation.status === "pending") {
+        console.info("[publish] user operation still pending", userOpHash);
         setState({
           status: "confirming",
           userOpHash,
@@ -214,7 +222,9 @@ export function CreateResourcePage() {
         return;
       }
 
+      console.info("[publish] receipt confirmed", confirmation.transactionHash);
       setState({ status: "publishing" });
+      console.info("[publish] creating resource");
       const response = await postResource(
         {
           ...pendingResource,
@@ -223,9 +233,11 @@ export function CreateResourcePage() {
         { wallet: address },
       );
 
+      console.info("[publish] resource created", response.resource.id);
       setPublishUserOpHash(null);
       router.replace(`/resource/${response.resource.id}?published=1`);
     } catch (error) {
+      console.error("[publish] failed", error);
       setPublishUserOpHash(null);
       setState({
         status: "error",
@@ -252,12 +264,15 @@ export function CreateResourcePage() {
 
     setCheckingPublishStatus(true);
     try {
+      console.info("[publish] checking pending payment status", userOpHash);
       const confirmation = await confirmUsdcPayment({
         bundlerClient,
         userOpHash,
+        timeoutMs: PUBLISH_PAYMENT_CONFIRMATION_TIMEOUT_MS,
       });
 
       if (confirmation.status === "pending") {
+        console.info("[publish] still pending", userOpHash);
         setState({
           status: "confirming",
           userOpHash,
@@ -266,7 +281,9 @@ export function CreateResourcePage() {
         return;
       }
 
+      console.info("[publish] receipt confirmed after retry", confirmation.transactionHash);
       setState({ status: "publishing" });
+      console.info("[publish] creating resource");
       const response = await postResource(
         {
           ...pendingResource,
@@ -275,9 +292,11 @@ export function CreateResourcePage() {
         { wallet: address },
       );
 
+      console.info("[publish] resource created", response.resource.id);
       setPublishUserOpHash(null);
       router.replace(`/resource/${response.resource.id}?published=1`);
     } catch (error) {
+      console.error("[publish] status check failed", error);
       setState({
         status: "confirming",
         userOpHash,
