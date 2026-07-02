@@ -257,18 +257,33 @@ function UnlockedContent({ resource }: { resource: ResourceDetail }) {
 
 function ArticleContent({ resource }: { resource: ResourceDetail }) {
   const markdown = getMarkdownContent(resource);
+  const isMarkdown = looksLikeMarkdownContent(markdown);
 
   return (
-    <div style={{ marginTop: 16 }}>
-      <div
-        id={`article-${resource.id}`}
-        className="resource-markdown"
-        dangerouslySetInnerHTML={{ __html: markdownToHtml(markdown) }}
-      />
+    <div style={{ marginTop: 16, maxWidth: "72ch" }}>
+      {isMarkdown ? (
+        <div
+          id={`article-${resource.id}`}
+          className="resource-markdown"
+          dangerouslySetInnerHTML={{ __html: markdownToHtml(markdown) }}
+        />
+      ) : (
+        <div id={`article-${resource.id}`} className="resource-plain-text">
+          {markdown}
+        </div>
+      )}
       <style jsx>{`
         .resource-markdown {
           color: var(--text-secondary);
           line-height: 1.75;
+          overflow-wrap: anywhere;
+        }
+
+        .resource-plain-text {
+          color: var(--text-secondary);
+          line-height: 1.75;
+          white-space: pre-wrap;
+          overflow-wrap: anywhere;
         }
 
         .resource-markdown h1,
@@ -297,6 +312,15 @@ function ArticleContent({ resource }: { resource: ResourceDetail }) {
         .resource-markdown blockquote,
         .resource-markdown pre {
           margin: 0 0 1em;
+        }
+
+        .resource-markdown p,
+        .resource-markdown ul,
+        .resource-markdown ol,
+        .resource-markdown li,
+        .resource-markdown blockquote {
+          white-space: pre-wrap;
+          overflow-wrap: anywhere;
         }
 
         .resource-markdown ul,
@@ -486,6 +510,13 @@ function getMarkdownContent(resource: ResourceDetail) {
 
   const url = resource.resourceUrl ?? resource.endpoint ?? "";
   return url.startsWith("data:") ? decodeDataUrl(url) : "";
+}
+
+function looksLikeMarkdownContent(content: string) {
+  return /(^|\n)\s{0,3}(#{1,6}\s|>\s|[-*]\s|\d+\.\s|```)/m.test(content) ||
+    /\*\*[^*\n]+\*\*/.test(content) ||
+    /`[^`\n]+`/.test(content) ||
+    /\[[^\]\n]+\]\((https?:\/\/[^\s)]+)\)/.test(content);
 }
 
 function parseFileAsset(resource: ResourceDetail) {
