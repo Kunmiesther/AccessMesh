@@ -14,6 +14,10 @@ import {
   type Hash,
 } from "viem";
 import {
+  createBundlerClient,
+  toWebAuthnAccount,
+} from "viem/account-abstraction";
+import {
   CCTP_EMPTY_DESTINATION_CALLER,
   CCTP_FINALITY_THRESHOLD_FAST,
   CCTP_FORWARDING_HOOK_DATA,
@@ -27,8 +31,8 @@ import {
 } from "@/lib/cctp-config";
 import { getStoredWalletSession, type StoredWalletSession } from "@/lib/modular-wallet";
 import {
-  toPasskeyTransport,
-  walletClientToLocalAccount,
+  toCircleSmartAccount,
+  toModularTransport,
 } from "@circle-fin/modular-wallets-core";
 
 type EthereumProvider = {
@@ -67,7 +71,9 @@ export type SourceUsdcBalance = {
 
 export type SourceBridgeState = SourceUsdcBalance & {
   kind: "circle" | "injected";
-  walletClient: ReturnType<typeof createWalletClient>;
+  walletClient?: ReturnType<typeof createWalletClient>;
+  smartAccount?: Awaited<ReturnType<typeof toCircleSmartAccount>>;
+  bundlerClient?: ReturnType<typeof createBundlerClient>;
   nativeGasBalance: bigint;
   allowance: bigint;
   needsApproval: boolean;
@@ -90,7 +96,9 @@ type SourceWalletContext =
       kind: "circle";
       account: Address;
       address: Address;
-      walletClient: ReturnType<typeof createWalletClient>;
+      walletClient?: ReturnType<typeof createWalletClient>;
+      smartAccount: Awaited<ReturnType<typeof toCircleSmartAccount>>;
+      bundlerClient: ReturnType<typeof createBundlerClient>;
     }
   | {
       kind: "injected";
@@ -98,6 +106,8 @@ type SourceWalletContext =
       address: Address;
       provider: EthereumProvider;
       walletClient: ReturnType<typeof createWalletClient>;
+      smartAccount?: undefined;
+      bundlerClient?: undefined;
     };
 
 const sourceKey: SupportedCctpSourceKey = "base-sepolia";
@@ -196,21 +206,10 @@ export async function executeCctpBridge(params: {
 
   if (!hasAllowance) {
     params.onStep?.("approving");
-    const approveTxHash = await sourceState.walletClient.sendTransaction({
-      account: sourceState.walletClient.account!,
-      chain: cctpBaseSepoliaChain,
-      to: sourceChain.usdcAddress,
-      data: encodeFunctionData({
-        abi: erc20Abi,
-        functionName: "approve",
-        args: [
-          sourceChain.tokenMessengerV2 as Address,
-          requiredBurnAmount,
-        ],
-      }),
-    });
-    const approvalReceipt = await publicClient.waitForTransactionReceipt({
-      hash: approveTxHash,
+    const approvalReceipt = await sendSourceApproval({
+      sourceState,
+      publicClient,
+      requiredBurnAmount,
     });
 
     if (approvalReceipt.status !== "success") {
@@ -230,49 +229,13 @@ export async function executeCctpBridge(params: {
   }
 
   params.onStep?.("bridging");
-  const sourceTxHash = await sourceState.walletClient.sendTransaction({
-    account: sourceState.walletClient.account!,
-    chain: cctpBaseSepoliaChain,
-    to: sourceChain.tokenMessengerV2 as Address,
-    data: encodeFunctionData({
-      abi: [
-        {
-          type: "function",
-          name: "depositForBurnWithHook",
-          stateMutability: "nonpayable",
-          inputs: [
-            { name: "amount", type: "uint256" },
-            { name: "destinationDomain", type: "uint32" },
-            { name: "mintRecipient", type: "bytes32" },
-            { name: "burnToken", type: "address" },
-            { name: "destinationCaller", type: "bytes32" },
-            { name: "maxFee", type: "uint256" },
-            { name: "minFinalityThreshold", type: "uint32" },
-            { name: "hookData", type: "bytes" },
-          ],
-          outputs: [],
-        },
-      ],
-      functionName: "depositForBurnWithHook",
-      args: [
-        BigInt(params.quote.totalBurnAmount),
-        cctpDestinationChain.domain,
-        pad(params.destinationAddress, { size: 32 }),
-        sourceChain.usdcAddress,
-        CCTP_EMPTY_DESTINATION_CALLER,
-        BigInt(params.quote.maxFee),
-        CCTP_FINALITY_THRESHOLD_FAST,
-        CCTP_FORWARDING_HOOK_DATA,
-      ],
-    }),
+  const sourceTxHash = await sendSourceBridge({
+    sourceState,
+    publicClient,
+    destinationAddress: params.destinationAddress,
+    burnAmount: BigInt(params.quote.totalBurnAmount),
+    maxFee: BigInt(params.quote.maxFee),
   });
-  const bridgeReceipt = await publicClient.waitForTransactionReceipt({
-    hash: sourceTxHash,
-  });
-
-  if (bridgeReceipt.status !== "success") {
-    throw new Error("CCTP bridge transaction failed.");
-  }
   await params.onSourceTx?.(sourceTxHash);
 
   params.onStep?.("receiving");
@@ -363,7 +326,7 @@ async function ensureSourceChain(provider: EthereumProvider) {
 async function resolveSourceWallet(): Promise<SourceWalletContext | null> {
   const storedSession = getStoredWalletSession();
   if (storedSession) {
-    return createCircleSourceWallet(storedSession);
+    return await createCircleSourceWallet(storedSession);
   }
 
   const provider = getEthereumProvider();
@@ -440,6 +403,8 @@ export async function getSourceBridgeState(
     balanceUSDC: Number(formatUnits(balance, 6)),
     kind: sourceWallet.kind,
     walletClient: sourceWallet.walletClient,
+    smartAccount: sourceWallet.smartAccount,
+    bundlerClient: sourceWallet.bundlerClient,
     nativeGasBalance,
     allowance,
     needsApproval: allowance < BigInt(requiredAmount),
@@ -447,27 +412,44 @@ export async function getSourceBridgeState(
   };
 }
 
-function createCircleSourceWallet(
+async function createCircleSourceWallet(
   storedSession: StoredWalletSession,
-): SourceWalletContext {
+): Promise<SourceWalletContext> {
   const { clientKey, clientUrl } = getClientEnv();
-  const passkeyWalletClient = createWalletClient({
-    transport: toPasskeyTransport(clientUrl, clientKey),
-    account: storedSession.address,
+  const modularTransport = toModularTransport(
+    getChainClientUrl(clientUrl),
+    clientKey,
+  );
+  const owner = toWebAuthnAccount({
+    credential: {
+      id: storedSession.credentialId,
+      publicKey: storedSession.credentialPublicKey,
+    },
+    rpId: storedSession.rpId,
   });
-  const account = walletClientToLocalAccount(passkeyWalletClient);
-
-  const walletClient = createWalletClient({
+  const publicClient = createPublicClient({
     chain: cctpBaseSepoliaChain,
-    transport: cctpBaseSepoliaTransport,
-    account,
+    transport: modularTransport,
+  });
+  const smartAccount = await toCircleSmartAccount({
+    client: publicClient,
+    owner,
+    name: storedSession.username,
+  });
+  const bundlerClient = createBundlerClient({
+    account: smartAccount,
+    chain: cctpBaseSepoliaChain,
+    client: publicClient,
+    transport: modularTransport,
+    paymaster: true,
   });
 
   return {
     kind: "circle",
-    account: getAddress(account.address) as Address,
-    address: getAddress(account.address) as Address,
-    walletClient,
+    account: storedSession.address,
+    address: storedSession.address,
+    smartAccount,
+    bundlerClient,
   };
 }
 
@@ -502,6 +484,148 @@ function getClientEnv() {
   }
 
   return { clientKey, clientUrl };
+}
+
+function getChainClientUrl(clientUrl: string) {
+  return `${clientUrl.replace(/\/+$/, "")}/arcTestnet`;
+}
+
+async function sendSourceApproval(params: {
+  sourceState: SourceBridgeState;
+  publicClient: ReturnType<typeof createPublicClient>;
+  requiredBurnAmount: bigint;
+}) {
+  const approveData = encodeFunctionData({
+    abi: erc20Abi,
+    functionName: "approve",
+    args: [sourceChain.tokenMessengerV2 as Address, params.requiredBurnAmount],
+  });
+
+  if (params.sourceState.kind === "circle") {
+    if (!params.sourceState.bundlerClient) {
+      throw new Error("Circle passkey wallet is not ready for source-chain bridging.");
+    }
+
+    const userOpHash = await params.sourceState.bundlerClient.sendUserOperation({
+      calls: [
+        {
+          to: sourceChain.usdcAddress,
+          data: approveData,
+          value: BigInt(0),
+        },
+      ],
+    });
+
+    const receipt = await params.sourceState.bundlerClient.waitForUserOperationReceipt({
+      hash: userOpHash,
+    });
+
+    if (!receipt.success) {
+      throw new Error(receipt.reason ?? "USDC approval transaction failed.");
+    }
+
+    return receipt.receipt;
+  }
+
+  if (!params.sourceState.walletClient) {
+    throw new Error("Injected wallet is not available for source-chain bridging.");
+  }
+
+  const approveTxHash = await params.sourceState.walletClient.sendTransaction({
+    account: params.sourceState.walletClient.account!,
+    chain: cctpBaseSepoliaChain,
+    to: sourceChain.usdcAddress,
+    data: approveData,
+  });
+
+  return params.publicClient.waitForTransactionReceipt({ hash: approveTxHash });
+}
+
+async function sendSourceBridge(params: {
+  sourceState: SourceBridgeState;
+  publicClient: ReturnType<typeof createPublicClient>;
+  destinationAddress: Address;
+  burnAmount: bigint;
+  maxFee: bigint;
+}) {
+  const bridgeData = encodeFunctionData({
+    abi: [
+      {
+        type: "function",
+        name: "depositForBurnWithHook",
+        stateMutability: "nonpayable",
+        inputs: [
+          { name: "amount", type: "uint256" },
+          { name: "destinationDomain", type: "uint32" },
+          { name: "mintRecipient", type: "bytes32" },
+          { name: "burnToken", type: "address" },
+          { name: "destinationCaller", type: "bytes32" },
+          { name: "maxFee", type: "uint256" },
+          { name: "minFinalityThreshold", type: "uint32" },
+          { name: "hookData", type: "bytes" },
+        ],
+        outputs: [],
+      },
+    ],
+    functionName: "depositForBurnWithHook",
+    args: [
+      params.burnAmount,
+      cctpDestinationChain.domain,
+      pad(params.destinationAddress, { size: 32 }),
+      sourceChain.usdcAddress,
+      CCTP_EMPTY_DESTINATION_CALLER,
+      params.maxFee,
+      CCTP_FINALITY_THRESHOLD_FAST,
+      CCTP_FORWARDING_HOOK_DATA,
+    ],
+  });
+
+  if (params.sourceState.kind === "circle") {
+    if (!params.sourceState.bundlerClient) {
+      throw new Error("Circle passkey wallet is not ready for source-chain bridging.");
+    }
+
+    const userOpHash = await params.sourceState.bundlerClient.sendUserOperation({
+      calls: [
+        {
+          to: sourceChain.tokenMessengerV2 as Address,
+          data: bridgeData,
+          value: BigInt(0),
+        },
+      ],
+    });
+
+    const receipt = await params.sourceState.bundlerClient.waitForUserOperationReceipt({
+      hash: userOpHash,
+    });
+
+    if (!receipt.success) {
+      throw new Error(receipt.reason ?? "CCTP bridge transaction failed.");
+    }
+
+    return receipt.receipt.transactionHash;
+  }
+
+  if (!params.sourceState.walletClient) {
+    throw new Error("Injected wallet is not available for source-chain bridging.");
+  }
+
+  const sourceTxHash = await params.sourceState.walletClient.sendTransaction({
+    account: params.sourceState.walletClient.account!,
+    chain: cctpBaseSepoliaChain,
+    to: sourceChain.tokenMessengerV2 as Address,
+    data: bridgeData,
+  });
+
+  const bridgeReceipt = await params.publicClient.waitForTransactionReceipt({
+    hash: sourceTxHash,
+  });
+
+  if (bridgeReceipt.status !== "success") {
+    throw new Error("CCTP bridge transaction failed.");
+  }
+
+  return sourceTxHash;
 }
 
 function isWalletMissingChainError(error: unknown) {
