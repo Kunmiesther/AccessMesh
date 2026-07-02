@@ -25,6 +25,11 @@ import {
   cctpSourceChains,
   type SupportedCctpSourceKey,
 } from "@/lib/cctp-config";
+import { getStoredWalletSession, type StoredWalletSession } from "@/lib/modular-wallet";
+import {
+  toPasskeyTransport,
+  walletClientToLocalAccount,
+} from "@circle-fin/modular-wallets-core";
 
 type EthereumProvider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
@@ -71,6 +76,21 @@ export type CctpBridgeExecution = {
   quote: CctpQuote;
 };
 
+type SourceWalletContext =
+  | {
+      kind: "circle";
+      account: Address;
+      address: Address;
+      walletClient: ReturnType<typeof createWalletClient>;
+    }
+  | {
+      kind: "injected";
+      account: Address;
+      address: Address;
+      provider: EthereumProvider;
+      walletClient: ReturnType<typeof createWalletClient>;
+    };
+
 const sourceKey: SupportedCctpSourceKey = "base-sepolia";
 const sourceChain = cctpSourceChains[sourceKey];
 
@@ -91,13 +111,8 @@ export async function readArcUsdcBalance(address: string) {
 export async function findSupportedSourceBalance(
   requiredAmount: bigint,
 ): Promise<SourceUsdcBalance | null> {
-  const provider = getEthereumProvider();
-  if (!provider) {
-    return null;
-  }
-
-  const wallet = await getSourceWalletAddress(provider);
-  if (!wallet) {
+  const sourceWallet = await resolveSourceWallet();
+  if (!sourceWallet) {
     return null;
   }
 
@@ -110,7 +125,7 @@ export async function findSupportedSourceBalance(
     address: sourceChain.usdcAddress,
     abi: erc20Abi,
     functionName: "balanceOf",
-    args: [wallet],
+    args: [sourceWallet.address],
   });
 
   if (balance < requiredAmount) {
@@ -120,7 +135,7 @@ export async function findSupportedSourceBalance(
   return {
     sourceKey,
     chainName: sourceChain.name,
-    wallet,
+    wallet: sourceWallet.address,
     balance,
     balanceUSDC: Number(formatUnits(balance, 6)),
   };
@@ -158,23 +173,30 @@ export async function executeCctpBridge(params: {
   onStep?: (step: "preparing" | "approving" | "bridging" | "receiving") => void;
   onSourceTx?: (sourceTxHash: Hash) => Promise<void> | void;
 }) {
-  const provider = requireEthereumProvider();
-  const walletClient = createWalletClient({
-    chain: cctpBaseSepoliaChain,
-    transport: custom(provider),
-    account: params.sourceWallet,
-  });
+  const sourceWallet = await resolveSourceWallet();
+  if (!sourceWallet) {
+    throw new Error("Connect your Circle passkey wallet or a supported injected wallet to bridge USDC.");
+  }
+
+  if (sourceWallet.address !== params.sourceWallet) {
+    throw new Error("The active source wallet changed. Refresh and try again.");
+  }
+
   const publicClient = createPublicClient({
     chain: cctpBaseSepoliaChain,
     transport: cctpBaseSepoliaTransport,
   });
 
+  if (sourceWallet.kind === "injected") {
+    await ensureSourceChain(sourceWallet.provider);
+  }
+
   params.onStep?.("preparing");
-  await ensureSourceChain(provider);
 
   params.onStep?.("approving");
-  const approveTxHash = await walletClient.sendTransaction({
-    account: params.sourceWallet,
+  const approveTxHash = await sourceWallet.walletClient.sendTransaction({
+    account: sourceWallet.walletClient.account!,
+    chain: cctpBaseSepoliaChain,
     to: sourceChain.usdcAddress,
     data: encodeFunctionData({
       abi: erc20Abi,
@@ -188,8 +210,9 @@ export async function executeCctpBridge(params: {
   await publicClient.waitForTransactionReceipt({ hash: approveTxHash });
 
   params.onStep?.("bridging");
-  const sourceTxHash = await walletClient.sendTransaction({
-    account: params.sourceWallet,
+  const sourceTxHash = await sourceWallet.walletClient.sendTransaction({
+    account: sourceWallet.walletClient.account!,
+    chain: cctpBaseSepoliaChain,
     to: sourceChain.tokenMessengerV2 as Address,
     data: encodeFunctionData({
       abi: [
@@ -311,27 +334,92 @@ async function ensureSourceChain(provider: EthereumProvider) {
   }
 }
 
-async function getSourceWalletAddress(provider: EthereumProvider) {
-  const accounts = (await provider.request({
-    method: "eth_requestAccounts",
-  })) as string[];
-  const account = accounts[0];
-
-  return account ? getAddress(account) : null;
-}
-
-function requireEthereumProvider() {
-  const provider = getEthereumProvider();
-  if (!provider) {
-    throw new Error("Connect a Base Sepolia wallet to bridge USDC.");
+async function resolveSourceWallet(): Promise<SourceWalletContext | null> {
+  const storedSession = getStoredWalletSession();
+  if (storedSession) {
+    return createCircleSourceWallet(storedSession);
   }
 
-  return provider;
+  const provider = getEthereumProvider();
+  if (!provider) {
+    return null;
+  }
+
+  const address = await getInjectedWalletAddress(provider);
+  if (!address) {
+    return null;
+  }
+
+  const walletClient = createWalletClient({
+    chain: cctpBaseSepoliaChain,
+    transport: custom(provider),
+    account: address,
+  });
+
+  return {
+    kind: "injected",
+    account: address,
+    address,
+    provider,
+    walletClient,
+  };
+}
+
+function createCircleSourceWallet(
+  storedSession: StoredWalletSession,
+): SourceWalletContext {
+  const { clientKey, clientUrl } = getClientEnv();
+  const passkeyWalletClient = createWalletClient({
+    transport: toPasskeyTransport(clientUrl, clientKey),
+    account: storedSession.address,
+  });
+  const account = walletClientToLocalAccount(passkeyWalletClient);
+
+  const walletClient = createWalletClient({
+    chain: cctpBaseSepoliaChain,
+    transport: cctpBaseSepoliaTransport,
+    account,
+  });
+
+  return {
+    kind: "circle",
+    account: getAddress(account.address) as Address,
+    address: getAddress(account.address) as Address,
+    walletClient,
+  };
+}
+
+async function getInjectedWalletAddress(provider: EthereumProvider) {
+  const accounts = (await provider.request({
+    method: "eth_accounts",
+  })) as string[];
+  const existingAccount = accounts[0];
+  if (existingAccount) {
+    return getAddress(existingAccount) as Address;
+  }
+
+  const requested = (await provider.request({
+    method: "eth_requestAccounts",
+  })) as string[];
+  const account = requested[0];
+
+  return account ? (getAddress(account) as Address) : null;
 }
 
 function getEthereumProvider(): EthereumProvider | null {
   const ethereum = (window as Window & { ethereum?: EthereumProvider }).ethereum;
   return ethereum ?? null;
+}
+
+function getClientEnv() {
+  const clientKey = process.env.NEXT_PUBLIC_CLIENT_KEY;
+  const clientUrl = process.env.NEXT_PUBLIC_CLIENT_URL;
+
+  if (!clientKey || !clientUrl) {
+    throw new Error("Missing NEXT_PUBLIC_CLIENT_KEY or NEXT_PUBLIC_CLIENT_URL.");
+  }
+
+  return { clientKey, clientUrl };
 }
 
 function isWalletMissingChainError(error: unknown) {
