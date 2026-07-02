@@ -15,7 +15,10 @@ import {
 } from "@/lib/cctp-client";
 import { cctpDestinationChain } from "@/lib/cctp-config";
 import type { ModularWalletSession } from "@/lib/modular-wallet";
-import { executeUsdcPayment } from "@/lib/usdc-transfer";
+import {
+  confirmUsdcPayment,
+  submitUsdcPayment,
+} from "@/lib/usdc-transfer";
 import type { PaymentIntent } from "@/types";
 
 type Props = {
@@ -72,11 +75,16 @@ export function PaymentIntentBox({
   const [bridgeBusy, setBridgeBusy] = useState(false);
   const [txHash, setTxHash] = useState<Hash | null>(null);
   const [bridgeTxHash, setBridgeTxHash] = useState<Hash | null>(null);
+  const [pendingPaymentUserOpHash, setPendingPaymentUserOpHash] = useState<Hash | null>(null);
+  const [pendingUnlockFlow, setPendingUnlockFlow] = useState<ProgressFlow | null>(null);
+  const [checkingPaymentStatus, setCheckingPaymentStatus] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [confirmingMsg, setConfirmingMsg] = useState("");
 
   async function handleUnlock() {
     setBridgePrompt(null);
+    setPendingPaymentUserOpHash(null);
+    setPendingUnlockFlow(null);
     await checkBalancesThenUnlock();
   }
 
@@ -246,11 +254,12 @@ export function PaymentIntentBox({
       throw new Error("Active wallet session is not available.");
     }
 
+    setPendingUnlockFlow(flow);
     setStep("paying");
     setUnlockingProgress(flow);
 
     try {
-      const hash = await executeUsdcPayment({
+      const userOpHash = await submitUsdcPayment({
         bundlerClient,
         transfers: [
           {
@@ -263,53 +272,115 @@ export function PaymentIntentBox({
           },
         ],
       });
-      setTxHash(hash);
+      setPendingPaymentUserOpHash(userOpHash);
 
-      setStep("verifying");
-      setUnlockingProgress(flow);
-      const result = await postUnlock(
-        {
-          accessId: intent.accessId,
-          txHash: hash,
-        },
-        {
-          wallet: walletAddress,
-        },
-      );
+      const confirmation = await confirmUsdcPayment({
+        bundlerClient,
+        userOpHash,
+      });
 
-      if (result.ok) {
-        setCompleteProgress(flow);
-        onUnlocked(result.resource, result.txHash);
-        return;
-      }
-
-      if (result.verification?.status === "CONFIRMING") {
+      if (confirmation.status === "pending") {
         setProgress(null);
         setStep("confirming");
-        setConfirmingMsg(
-          result.verification.reason ??
-            "Payment is being confirmed on-chain. This may take a few moments.",
-        );
+        setConfirmingMsg("Transaction is taking longer than expected.");
         return;
       }
 
-      if (result.verification?.status === "FAILED") {
-        setProgress(null);
-        setStep("error");
-        setErrorMsg("Payment verification failed. Check that the transaction settled correctly.");
-        return;
-      }
-
-      setProgress(null);
-      setStep("error");
-      setErrorMsg("Unexpected response from verification. Try again.");
+      await settleUnlockAfterPayment(flow, confirmation.transactionHash);
     } catch (err: unknown) {
       setProgress(null);
-      setStep("error");
-      setErrorMsg(
+      setStep("confirming");
+      setPendingPaymentUserOpHash(null);
+      setPendingUnlockFlow(null);
+      setConfirmingMsg(
         err instanceof Error ? err.message : "Payment or verification failed.",
       );
     }
+  }
+
+  async function handleCheckPaymentStatus() {
+    if (!bundlerClient || !pendingPaymentUserOpHash || !pendingUnlockFlow) {
+      return;
+    }
+
+    setCheckingPaymentStatus(true);
+    try {
+      const confirmation = await confirmUsdcPayment({
+        bundlerClient,
+        userOpHash: pendingPaymentUserOpHash,
+      });
+
+      if (confirmation.status === "pending") {
+        setProgress(null);
+        setStep("confirming");
+        setConfirmingMsg("Transaction is taking longer than expected.");
+        return;
+      }
+
+      await settleUnlockAfterPayment(
+        pendingUnlockFlow,
+        confirmation.transactionHash,
+      );
+    } catch (err: unknown) {
+      setProgress(null);
+      setStep("confirming");
+      setConfirmingMsg(
+        err instanceof Error ? err.message : "Payment or verification failed.",
+      );
+    } finally {
+      setCheckingPaymentStatus(false);
+    }
+  }
+
+  async function settleUnlockAfterPayment(flow: ProgressFlow, txHash: Hash) {
+    setTxHash(txHash);
+    setStep("verifying");
+    setUnlockingProgress(flow);
+
+    const result = await postUnlock(
+      {
+        accessId: intent.accessId,
+        txHash,
+      },
+      {
+        wallet: walletAddress,
+      },
+    );
+
+    if (result.ok) {
+      setPendingPaymentUserOpHash(null);
+      setPendingUnlockFlow(null);
+      setCompleteProgress(flow);
+      onUnlocked(result.resource, result.txHash);
+      return;
+    }
+
+    if (result.verification?.status === "CONFIRMING") {
+      setProgress(null);
+      setStep("confirming");
+      setPendingPaymentUserOpHash(null);
+      setPendingUnlockFlow(null);
+      setConfirmingMsg(
+        result.verification.reason ??
+          "Payment is being confirmed on-chain. This may take a few moments.",
+      );
+      return;
+    }
+
+    if (result.verification?.status === "FAILED") {
+      setProgress(null);
+      setStep("error");
+      setPendingPaymentUserOpHash(null);
+      setPendingUnlockFlow(null);
+      setErrorMsg("Payment verification failed. Check that the transaction settled correctly.");
+      return;
+    }
+
+    setProgress(null);
+    setStep("error");
+    setPendingPaymentUserOpHash(null);
+    setPendingUnlockFlow(null);
+    setErrorMsg("Unexpected response from verification. Try again.");
   }
 
   async function waitForArcBalance(requiredAmount: bigint) {
@@ -457,11 +528,56 @@ export function PaymentIntentBox({
 
       {step === "confirming" && (
         <div style={confirmingBoxStyle}>
-          <p style={confirmingTitleStyle}>Confirming - {confirmingMsg}</p>
+          <p style={confirmingTitleStyle}>{confirmingMsg}</p>
           <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, lineHeight: 1.5 }}>
-            Your payment was submitted. Access will be granted once Arc verification reports
-            final settlement.
+            Your payment was submitted. Access will be granted once the transaction is confirmed.
           </p>
+          {pendingPaymentUserOpHash && (
+            <div style={{ marginTop: 12 }}>
+              <HashBlock label="User operation" hash={pendingPaymentUserOpHash} />
+            </div>
+          )}
+          <div style={{ marginTop: 12 }}>
+            <button
+              type="button"
+              onClick={handleCheckPaymentStatus}
+              disabled={
+                checkingPaymentStatus ||
+                !pendingPaymentUserOpHash ||
+                !pendingUnlockFlow
+              }
+              style={{
+                width: "100%",
+                padding: "10px",
+                background:
+                  checkingPaymentStatus ||
+                  !pendingPaymentUserOpHash ||
+                  !pendingUnlockFlow
+                    ? "var(--border)"
+                    : "var(--accent)",
+                color:
+                  checkingPaymentStatus ||
+                  !pendingPaymentUserOpHash ||
+                  !pendingUnlockFlow
+                    ? "var(--text-muted)"
+                    : "#000",
+                border: "none",
+                borderRadius: 4,
+                fontSize: 13,
+                fontWeight: 500,
+                cursor:
+                  checkingPaymentStatus ||
+                  !pendingPaymentUserOpHash ||
+                  !pendingUnlockFlow
+                    ? "not-allowed"
+                    : "pointer",
+                fontFamily: "var(--font-mono)",
+                letterSpacing: "0.02em",
+              }}
+            >
+              {checkingPaymentStatus ? "Checking status..." : "Check status"}
+            </button>
+          </div>
         </div>
       )}
 

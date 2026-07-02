@@ -11,7 +11,20 @@ import {
 import { getArcUserOperationGasFees } from "@/lib/arc-gas";
 import type { ModularWalletSession } from "@/lib/modular-wallet";
 
-export async function executeUsdcPayment(params: {
+export const USDC_PAYMENT_CONFIRMATION_TIMEOUT_MS = 300_000;
+
+export type UsdcPaymentConfirmation =
+  | {
+      status: "confirmed";
+      userOpHash: Hash;
+      transactionHash: Hash;
+    }
+  | {
+      status: "pending";
+      userOpHash: Hash;
+    };
+
+export async function submitUsdcPayment(params: {
   bundlerClient: ModularWalletSession["bundlerClient"];
   transfers: Array<{
     recipientWallet: Address;
@@ -29,22 +42,78 @@ export async function executeUsdcPayment(params: {
   }
 
   const gasFees = await getArcUserOperationGasFees();
-  const userOpHash = await params.bundlerClient.sendUserOperation({
+  return params.bundlerClient.sendUserOperation({
     calls,
     maxPriorityFeePerGas: gasFees.maxPriorityFeePerGas,
     maxFeePerGas: gasFees.maxFeePerGas,
   });
+}
 
-  const receipt = await params.bundlerClient.waitForUserOperationReceipt({
-    hash: userOpHash,
-    timeout: 120_000,
+export async function confirmUsdcPayment(params: {
+  bundlerClient: ModularWalletSession["bundlerClient"];
+  userOpHash: Hash;
+  timeoutMs?: number;
+}): Promise<UsdcPaymentConfirmation> {
+  const timeoutMs = params.timeoutMs ?? USDC_PAYMENT_CONFIRMATION_TIMEOUT_MS;
+
+  try {
+    const receipt = await params.bundlerClient.waitForUserOperationReceipt({
+      hash: params.userOpHash,
+      timeout: timeoutMs,
+    });
+
+    if (!receipt.success) {
+      throw new Error(receipt.reason ?? "USDC payment user operation reverted.");
+    }
+
+    return {
+      status: "confirmed",
+      userOpHash: params.userOpHash,
+      transactionHash: receipt.receipt.transactionHash,
+    };
+  } catch (error) {
+    if (!isUserOperationTimeoutError(error)) {
+      throw error;
+    }
+
+    const confirmation = await tryGetUserOperationReceipt(
+      params.bundlerClient,
+      params.userOpHash,
+    );
+
+    if (confirmation) {
+      return {
+        status: "confirmed",
+        userOpHash: params.userOpHash,
+        transactionHash: confirmation.receipt.transactionHash,
+      };
+    }
+
+    return {
+      status: "pending",
+      userOpHash: params.userOpHash,
+    };
+  }
+}
+
+export async function executeUsdcPayment(params: {
+  bundlerClient: ModularWalletSession["bundlerClient"];
+  transfers: Array<{
+    recipientWallet: Address;
+    amountUSDC: number;
+  }>;
+}): Promise<Hash> {
+  const userOpHash = await submitUsdcPayment(params);
+  const confirmation = await confirmUsdcPayment({
+    bundlerClient: params.bundlerClient,
+    userOpHash,
   });
 
-  if (!receipt.success) {
-    throw new Error(receipt.reason ?? "USDC payment user operation reverted.");
+  if (confirmation.status !== "confirmed") {
+    throw new Error("Transaction submitted but still pending.");
   }
 
-  return receipt.receipt.transactionHash;
+  return confirmation.transactionHash;
 }
 
 function buildTransferCall(recipientWallet: Address, amountUSDC: number) {
@@ -57,4 +126,22 @@ function buildTransferCall(recipientWallet: Address, amountUSDC: number) {
     }),
     value: BigInt(0),
   };
+}
+
+async function tryGetUserOperationReceipt(
+  bundlerClient: ModularWalletSession["bundlerClient"],
+  userOpHash: Hash,
+) {
+  try {
+    return await bundlerClient.getUserOperationReceipt({
+      hash: userOpHash,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function isUserOperationTimeoutError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /timed out.*user operation/i.test(message);
 }

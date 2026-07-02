@@ -4,11 +4,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CSSProperties, ReactNode } from "react";
 import { FormEvent, useEffect, useState } from "react";
-import { type Address } from "viem";
+import { type Address, type Hash } from "viem";
 import { CoverImageUpload } from "@/components/CoverImageUpload";
 import { Navbar } from "@/components/Navbar";
 import { getPublishFeeConfig, postResource } from "@/lib/api";
-import { executeUsdcPayment } from "@/lib/usdc-transfer";
+import {
+  confirmUsdcPayment,
+  submitUsdcPayment,
+} from "@/lib/usdc-transfer";
 import { useWallet } from "@/lib/ui/WalletContext";
 import type {
   CreateResourceRequest,
@@ -43,6 +46,7 @@ type PublishState =
   | { status: "preparing" }
   | { status: "awaiting-confirmation" }
   | { status: "paying" }
+  | { status: "confirming"; userOpHash: Hash; message: string }
   | { status: "publishing" }
   | { status: "error"; message: string };
 
@@ -56,6 +60,8 @@ export function CreateResourcePage() {
     useState<PublishFeeConfig | null>(null);
   const [pendingResource, setPendingResource] =
     useState<PendingResourceRequest | null>(null);
+  const [publishUserOpHash, setPublishUserOpHash] = useState<Hash | null>(null);
+  const [checkingPublishStatus, setCheckingPublishStatus] = useState(false);
   const [creatorDisplayName, setCreatorDisplayName] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -113,6 +119,7 @@ export function CreateResourcePage() {
     }
 
     setState({ status: "preparing" });
+    setPublishUserOpHash(null);
 
     try {
       const coverImage = coverImageFile
@@ -180,7 +187,8 @@ export function CreateResourcePage() {
 
     try {
       setState({ status: "paying" });
-      const publishTxHash = await executeUsdcPayment({
+      setPublishUserOpHash(null);
+      const userOpHash = await submitUsdcPayment({
         bundlerClient,
         transfers: [
           {
@@ -190,22 +198,94 @@ export function CreateResourcePage() {
         ],
       });
 
+      setPublishUserOpHash(userOpHash);
+
+      const confirmation = await confirmUsdcPayment({
+        bundlerClient,
+        userOpHash,
+      });
+
+      if (confirmation.status === "pending") {
+        setState({
+          status: "confirming",
+          userOpHash,
+          message: "Transaction is taking longer than expected.",
+        });
+        return;
+      }
+
       setState({ status: "publishing" });
       const response = await postResource(
         {
           ...pendingResource,
-          publishTxHash,
+          publishTxHash: confirmation.transactionHash,
         },
         { wallet: address },
       );
 
+      setPublishUserOpHash(null);
+      router.replace(`/resource/${response.resource.id}?published=1`);
+    } catch (error) {
+      setPublishUserOpHash(null);
+      setState({
+        status: "error",
+        message: getPublishErrorMessage(error),
+      });
+    }
+  }
+
+  async function handleCheckPublishStatus() {
+    if (!connected || !address || !bundlerClient || !pendingResource) {
+      return;
+    }
+
+    const userOpHash =
+      state.status === "confirming" ? state.userOpHash : publishUserOpHash;
+
+    if (!userOpHash) {
+      setState({
+        status: "error",
+        message: "No pending publish transaction was found.",
+      });
+      return;
+    }
+
+    setCheckingPublishStatus(true);
+    try {
+      const confirmation = await confirmUsdcPayment({
+        bundlerClient,
+        userOpHash,
+      });
+
+      if (confirmation.status === "pending") {
+        setState({
+          status: "confirming",
+          userOpHash,
+          message: "Transaction is taking longer than expected.",
+        });
+        return;
+      }
+
+      setState({ status: "publishing" });
+      const response = await postResource(
+        {
+          ...pendingResource,
+          publishTxHash: confirmation.transactionHash,
+        },
+        { wallet: address },
+      );
+
+      setPublishUserOpHash(null);
       router.replace(`/resource/${response.resource.id}?published=1`);
     } catch (error) {
       setState({
-        status: "error",
+        status: "confirming",
+        userOpHash,
         message:
-          error instanceof Error ? error.message : "Resource could not be published.",
+          error instanceof Error ? error.message : "Could not confirm payment yet.",
       });
+    } finally {
+      setCheckingPublishStatus(false);
     }
   }
 
@@ -217,7 +297,8 @@ export function CreateResourcePage() {
   const disabled =
     state.status === "preparing" ||
     state.status === "paying" ||
-    state.status === "publishing";
+    state.status === "publishing" ||
+    state.status === "confirming";
   const submitDisabled = disabled || !publishFeeConfig;
   const confirmationOpen =
     state.status === "awaiting-confirmation" ||
@@ -427,6 +508,35 @@ export function CreateResourcePage() {
               <p style={{ ...messageStyle, color: "var(--error)" }}>{state.message}</p>
             )}
 
+            {state.status === "confirming" && (
+              <div style={pendingPaymentStyle}>
+                <p style={pendingPaymentTitleStyle}>
+                  Transaction is taking longer than expected.
+                </p>
+                <p style={pendingPaymentBodyStyle}>
+                  Check status to continue once the payment confirms.
+                </p>
+                <HashBlock label="User operation" hash={state.userOpHash} />
+                <div style={pendingPaymentActionRowStyle}>
+                  <button
+                    type="button"
+                    onClick={handleCheckPublishStatus}
+                    disabled={checkingPublishStatus}
+                    style={{
+                      ...primaryButtonStyle,
+                      background: checkingPublishStatus
+                        ? "var(--border)"
+                        : "var(--accent)",
+                      color: checkingPublishStatus ? "var(--text-muted)" : "#000",
+                      cursor: checkingPublishStatus ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {checkingPublishStatus ? "Checking status..." : "Check status"}
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div style={actionsStyle}>
               <Link href="/dashboard" style={secondaryButtonStyle}>
                 Cancel
@@ -443,9 +553,17 @@ export function CreateResourcePage() {
               >
                 {state.status === "preparing"
                   ? "Preparing..."
-                  : publishFeeConfig
-                    ? "Publish"
-                    : "Loading publish fee..."}
+                  : state.status === "paying"
+                    ? publishUserOpHash
+                      ? "Waiting for confirmation..."
+                      : "Submitting payment..."
+                    : state.status === "publishing"
+                      ? "Payment confirmed. Publishing resource..."
+                      : state.status === "confirming"
+                        ? "Transaction is pending..."
+                        : publishFeeConfig
+                          ? "Publish"
+                          : "Loading publish fee..."}
               </button>
             </div>
           </form>
@@ -514,9 +632,9 @@ function PublishConfirmationModal({
   const busy = status === "paying" || status === "publishing";
   const actionLabel =
     status === "paying"
-      ? "Executing USDC transfer..."
+      ? "Submitting payment..."
       : status === "publishing"
-        ? "Verifying and publishing..."
+        ? "Payment confirmed. Publishing resource..."
         : "Pay fee and publish";
 
   return (
@@ -562,6 +680,15 @@ function PublishConfirmationModal({
   );
 }
 
+function HashBlock({ label, hash }: { label: string; hash: string }) {
+  return (
+    <div style={hashBlockStyle}>
+      <p style={hashLabelStyle}>{label}</p>
+      <p style={hashValueStyle}>{hash}</p>
+    </div>
+  );
+}
+
 async function buildResourceData(params: {
   resourceType: PublishedResourceType;
   articleContent: string;
@@ -600,6 +727,18 @@ async function buildResourceData(params: {
   return {
     externalUrl: url,
   };
+}
+
+function getPublishErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    if (/timed out while waiting for user operation/i.test(error.message)) {
+      return "Transaction is taking longer than expected.";
+    }
+
+    return error.message;
+  }
+
+  return "Resource could not be published.";
 }
 
 function readFileAsDataUrl(file: File) {
@@ -763,6 +902,59 @@ const modalMetaLabelStyle = {
 } satisfies CSSProperties;
 
 const modalMetaValueStyle = {
+  color: "var(--text-secondary)",
+  wordBreak: "break-all",
+} satisfies CSSProperties;
+
+const pendingPaymentStyle = {
+  marginTop: 18,
+  padding: 18,
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+  background: "rgba(0,194,168,0.06)",
+} satisfies CSSProperties;
+
+const pendingPaymentTitleStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 12,
+  color: "var(--accent)",
+  marginBottom: 6,
+} satisfies CSSProperties;
+
+const pendingPaymentBodyStyle = {
+  fontSize: 12,
+  color: "var(--text-secondary)",
+  lineHeight: 1.5,
+  marginBottom: 12,
+} satisfies CSSProperties;
+
+const pendingPaymentActionRowStyle = {
+  display: "flex",
+  justifyContent: "flex-end",
+  marginTop: 12,
+} satisfies CSSProperties;
+
+const hashBlockStyle = {
+  display: "grid",
+  gap: 4,
+  marginTop: 10,
+  padding: 12,
+  border: "1px solid var(--border)",
+  borderRadius: 6,
+  background: "#0a0a0a",
+} satisfies CSSProperties;
+
+const hashLabelStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 10,
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  color: "var(--text-muted)",
+} satisfies CSSProperties;
+
+const hashValueStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 12,
   color: "var(--text-secondary)",
   wordBreak: "break-all",
 } satisfies CSSProperties;
