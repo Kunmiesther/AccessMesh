@@ -4,15 +4,26 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CSSProperties, ReactNode } from "react";
 import { FormEvent, useEffect, useState } from "react";
-import { type Address, type Hash } from "viem";
+import {
+  encodeFunctionData,
+  erc20Abi,
+  parseUnits,
+  type Address,
+  type Hash,
+  type Transport,
+} from "viem";
+import { createBundlerClient } from "viem/account-abstraction";
 import { CoverImageUpload } from "@/components/CoverImageUpload";
 import { Navbar } from "@/components/Navbar";
+import { getArcUserOperationGasFees } from "@/lib/arc-gas";
+import { ArcTestnet } from "@circle-fin/app-kit/chains";
 import { getPublishFeeConfig, postResource } from "@/lib/api";
 import {
   confirmUsdcPayment,
   submitUsdcPayment,
 } from "@/lib/usdc-transfer";
 import { useWallet } from "@/lib/ui/WalletContext";
+import type { ModularWalletSession } from "@/lib/modular-wallet";
 import type {
   CreateResourceRequest,
   PublishedResourceType,
@@ -192,8 +203,18 @@ export function CreateResourcePage() {
       setState({ status: "paying" });
       setPublishUserOpHash(null);
       console.info("[publish] sending publish fee");
-      const userOpHash = await submitUsdcPayment({
+      const publishBundlerClient = createPublishBundlerClient({
         bundlerClient,
+        smartAccount,
+      });
+      await assertPublishNativeGasBalance({
+        bundlerClient: publishBundlerClient,
+        wallet: address,
+        treasuryWallet: publishFeeConfig.treasuryWallet as Address,
+        amountUSDC: publishFeeConfig.publishFeeUSDC,
+      });
+      const userOpHash = await submitUsdcPayment({
+        bundlerClient: publishBundlerClient,
         transfers: [
           {
             recipientWallet: publishFeeConfig.treasuryWallet as Address,
@@ -207,7 +228,7 @@ export function CreateResourcePage() {
       console.info("[publish] waiting for receipt");
 
       const confirmation = await confirmUsdcPayment({
-        bundlerClient,
+        bundlerClient: publishBundlerClient,
         userOpHash,
         timeoutMs: PUBLISH_PAYMENT_CONFIRMATION_TIMEOUT_MS,
       });
@@ -264,9 +285,13 @@ export function CreateResourcePage() {
 
     setCheckingPublishStatus(true);
     try {
+      const publishBundlerClient = createPublishBundlerClient({
+        bundlerClient,
+        smartAccount,
+      });
       console.info("[publish] checking pending payment status", userOpHash);
       const confirmation = await confirmUsdcPayment({
-        bundlerClient,
+        bundlerClient: publishBundlerClient,
         userOpHash,
         timeoutMs: PUBLISH_PAYMENT_CONFIRMATION_TIMEOUT_MS,
       });
@@ -767,6 +792,68 @@ function readFileAsDataUrl(file: File) {
     reader.onerror = () => reject(new Error("Resource file could not be read."));
     reader.readAsDataURL(file);
   });
+}
+
+function createPublishBundlerClient(params: {
+  bundlerClient: NonNullable<ModularWalletSession["bundlerClient"]>;
+  smartAccount: NonNullable<ModularWalletSession["smartAccount"]>;
+}) {
+  return createBundlerClient({
+    account: params.smartAccount,
+    chain: params.bundlerClient.chain,
+    client: params.bundlerClient.client,
+    transport: params.bundlerClient.transport as unknown as Transport,
+  });
+}
+
+async function assertPublishNativeGasBalance(params: {
+  bundlerClient: ReturnType<typeof createPublishBundlerClient>;
+  wallet: Address;
+  treasuryWallet: Address;
+  amountUSDC: number;
+}) {
+  const nativeGasBalance = await params.bundlerClient.client.getBalance({
+    address: params.wallet,
+  });
+
+  if (nativeGasBalance === BigInt(0)) {
+    throw new Error("You need Arc testnet gas to publish this resource.");
+  }
+
+  const gasFees = await getArcUserOperationGasFees(params.bundlerClient.client);
+  const publishGasEstimate = await params.bundlerClient.estimateUserOperationGas({
+    calls: [buildPublishTransferCall({
+      treasuryWallet: params.treasuryWallet,
+      amountUSDC: params.amountUSDC,
+    })],
+  });
+
+  const estimatedGasCost =
+    (publishGasEstimate.preVerificationGas +
+      publishGasEstimate.verificationGasLimit +
+      publishGasEstimate.callGasLimit +
+      (publishGasEstimate.paymasterVerificationGasLimit ?? BigInt(0)) +
+      (publishGasEstimate.paymasterPostOpGasLimit ?? BigInt(0))) *
+    gasFees.maxFeePerGas;
+
+  if (nativeGasBalance < estimatedGasCost) {
+    throw new Error("You need Arc testnet gas to publish this resource.");
+  }
+}
+
+function buildPublishTransferCall(params: {
+  treasuryWallet: Address;
+  amountUSDC: number;
+}) {
+  return {
+    to: ArcTestnet.usdcAddress as Address,
+    data: encodeFunctionData({
+      abi: erc20Abi,
+      functionName: "transfer",
+      args: [params.treasuryWallet, parseUnits(params.amountUSDC.toString(), 6)],
+    }),
+    value: BigInt(0),
+  };
 }
 
 const eyebrowStyle = {

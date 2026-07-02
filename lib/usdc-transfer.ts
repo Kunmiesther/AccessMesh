@@ -29,8 +29,16 @@ export type UsdcPaymentConfirmation =
       userOpHash: Hash;
     };
 
+export type UsdcBundlerClient = Pick<
+  NonNullable<ModularWalletSession["bundlerClient"]>,
+  | "sendUserOperation"
+  | "waitForUserOperationReceipt"
+  | "getUserOperationReceipt"
+  | "getUserOperation"
+>;
+
 export async function submitUsdcPayment(params: {
-  bundlerClient: ModularWalletSession["bundlerClient"];
+  bundlerClient: UsdcBundlerClient;
   transfers: Array<{
     recipientWallet: Address;
     amountUSDC: number;
@@ -55,7 +63,7 @@ export async function submitUsdcPayment(params: {
 }
 
 export async function confirmUsdcPayment(params: {
-  bundlerClient: ModularWalletSession["bundlerClient"];
+  bundlerClient: UsdcBundlerClient;
   userOpHash: Hash;
   timeoutMs?: number;
 }): Promise<UsdcPaymentConfirmation> {
@@ -115,7 +123,7 @@ export async function confirmUsdcPayment(params: {
 }
 
 export async function executeUsdcPayment(params: {
-  bundlerClient: ModularWalletSession["bundlerClient"];
+  bundlerClient: UsdcBundlerClient;
   transfers: Array<{
     recipientWallet: Address;
     amountUSDC: number;
@@ -147,7 +155,7 @@ function buildTransferCall(recipientWallet: Address, amountUSDC: number) {
 }
 
 async function tryGetUserOperationReceipt(
-  bundlerClient: ModularWalletSession["bundlerClient"],
+  bundlerClient: UsdcBundlerClient,
   userOpHash: Hash,
 ) {
   try {
@@ -164,7 +172,7 @@ async function tryGetUserOperationReceipt(
 }
 
 async function tryGetUserOperation(
-  bundlerClient: ModularWalletSession["bundlerClient"],
+  bundlerClient: UsdcBundlerClient,
   userOpHash: Hash,
 ) {
   try {
