@@ -104,7 +104,6 @@ export function PaymentIntentBox({
         return;
       }
 
-      setBridgeProgress("Preparing bridge...");
       const sourceBalance = await getSourceBridgeState(requiredAmount);
       if (!sourceBalance) {
         setProgress(null);
@@ -160,6 +159,7 @@ export function PaymentIntentBox({
       const requiredAmount = getRequiredUnlockAmount(intent);
       setBridgeProgress("Preparing bridge...");
       bridge = await executeCctpBridge({
+        sourceKey: bridgePrompt.sourceBalance.sourceKey,
         sourceWallet: bridgePrompt.sourceBalance.wallet,
         destinationAddress: walletAddress,
         amountUSDC: bridgePrompt.amountUSDC,
@@ -564,7 +564,7 @@ function getBridgeErrorMessage(err: unknown) {
   const message = err instanceof Error ? err.message : "Bridge failed.";
 
   if (/gas required exceeds allowance/i.test(message)) {
-    return "You have Base Sepolia USDC, but you need Base Sepolia ETH to pay gas for the bridge transaction.";
+    return "The source wallet needs native gas to pay for the bridge transaction.";
   }
 
   return message;

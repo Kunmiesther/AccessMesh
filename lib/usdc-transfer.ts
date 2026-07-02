@@ -8,6 +8,7 @@ import {
   type Address,
   type Hash,
 } from "viem";
+import { getArcUserOperationGasFees } from "@/lib/arc-gas";
 import type { ModularWalletSession } from "@/lib/modular-wallet";
 
 export async function executeUsdcPayment(params: {
@@ -27,7 +28,12 @@ export async function executeUsdcPayment(params: {
     throw new Error("USDC payment requires at least one positive transfer.");
   }
 
-  const userOpHash = await params.bundlerClient.sendUserOperation({ calls });
+  const gasFees = await getArcUserOperationGasFees();
+  const userOpHash = await params.bundlerClient.sendUserOperation({
+    calls,
+    maxPriorityFeePerGas: gasFees.maxPriorityFeePerGas,
+    maxFeePerGas: gasFees.maxFeePerGas,
+  });
 
   const receipt = await params.bundlerClient.waitForUserOperationReceipt({
     hash: userOpHash,

@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { jsonError } from "@/lib/http";
 import { InputError } from "@/lib/validation";
 import { getForwardedMintMessage } from "@/services/cctpIrisService";
-import type { SupportedCctpSourceKey } from "@/lib/cctp-config";
+import {
+  isSupportedCctpSourceKey,
+  type SupportedCctpSourceKey,
+} from "@/lib/cctp-config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,7 +38,7 @@ export async function GET(request: Request) {
 }
 
 function requireSourceKey(value: string | null): SupportedCctpSourceKey {
-  if (value === "base-sepolia") {
+  if (isSupportedCctpSourceKey(value)) {
     return value;
   }
 
