@@ -6,12 +6,12 @@ import { postCctpBridgeEvent, postUnlock } from "@/lib/api";
 import {
   amountToUsdcSubunits,
   executeCctpBridge,
-  findSupportedSourceBalance,
   getCctpQuote,
+  getSourceBridgeState,
   readArcUsdcBalance,
   type CctpBridgeExecution,
   type CctpQuote,
-  type SourceUsdcBalance,
+  type SourceBridgeState,
 } from "@/lib/cctp-client";
 import { cctpDestinationChain } from "@/lib/cctp-config";
 import type { ModularWalletSession } from "@/lib/modular-wallet";
@@ -54,7 +54,7 @@ type ProgressState =
 type ProgressFlow = ProgressState["flow"];
 
 type BridgePrompt = {
-  sourceBalance: SourceUsdcBalance;
+  sourceBalance: SourceBridgeState;
   quote: CctpQuote;
   amountUSDC: number;
 };
@@ -105,7 +105,7 @@ export function PaymentIntentBox({
       }
 
       setBridgeProgress("Preparing bridge...");
-      const sourceBalance = await findSupportedSourceBalance(requiredAmount);
+      const sourceBalance = await getSourceBridgeState(requiredAmount);
       if (!sourceBalance) {
         setProgress(null);
         setStep("error");
@@ -158,16 +158,6 @@ export function PaymentIntentBox({
 
     try {
       const requiredAmount = getRequiredUnlockAmount(intent);
-      const arcBalance = await readArcUsdcBalance(walletAddress);
-
-      if (arcBalance >= requiredAmount) {
-        setBridgePrompt(null);
-        setDirectProgress("Arc USDC detected.");
-        await executeExistingUnlock("direct");
-        return;
-      }
-
-      setStep("paying");
       setBridgeProgress("Preparing bridge...");
       bridge = await executeCctpBridge({
         sourceWallet: bridgePrompt.sourceBalance.wallet,
@@ -233,7 +223,7 @@ export function PaymentIntentBox({
     } catch (err: unknown) {
       setProgress(null);
       setStep("error");
-      setErrorMsg(err instanceof Error ? err.message : "Bridge failed.");
+      setErrorMsg(getBridgeErrorMessage(err));
 
       if (sourceTxHash ?? bridge?.sourceTxHash) {
         await postCctpBridgeEvent(
@@ -568,6 +558,16 @@ function getRequiredUnlockAmount(intent: PaymentIntent) {
 
 function usdcSubunitsToAmount(amount: bigint) {
   return Number(formatUnits(amount, 6));
+}
+
+function getBridgeErrorMessage(err: unknown) {
+  const message = err instanceof Error ? err.message : "Bridge failed.";
+
+  if (/gas required exceeds allowance/i.test(message)) {
+    return "You have Base Sepolia USDC, but you need Base Sepolia ETH to pay gas for the bridge transaction.";
+  }
+
+  return message;
 }
 
 function ReceiptLine({

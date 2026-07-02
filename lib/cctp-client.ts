@@ -65,6 +65,15 @@ export type SourceUsdcBalance = {
   balanceUSDC: number;
 };
 
+export type SourceBridgeState = SourceUsdcBalance & {
+  kind: "circle" | "injected";
+  walletClient: ReturnType<typeof createWalletClient>;
+  nativeGasBalance: bigint;
+  allowance: bigint;
+  needsApproval: boolean;
+  provider?: EthereumProvider;
+};
+
 export type CctpBridgeExecution = {
   sourceKey: SupportedCctpSourceKey;
   sourceWallet: Address;
@@ -111,34 +120,12 @@ export async function readArcUsdcBalance(address: string) {
 export async function findSupportedSourceBalance(
   requiredAmount: bigint,
 ): Promise<SourceUsdcBalance | null> {
-  const sourceWallet = await resolveSourceWallet();
-  if (!sourceWallet) {
+  const sourceState = await getSourceBridgeState(requiredAmount);
+  if (!sourceState) {
     return null;
   }
 
-  const publicClient = createPublicClient({
-    chain: cctpBaseSepoliaChain,
-    transport: cctpBaseSepoliaTransport,
-  });
-
-  const balance = await publicClient.readContract({
-    address: sourceChain.usdcAddress,
-    abi: erc20Abi,
-    functionName: "balanceOf",
-    args: [sourceWallet.address],
-  });
-
-  if (balance < requiredAmount) {
-    return null;
-  }
-
-  return {
-    sourceKey,
-    chainName: sourceChain.name,
-    wallet: sourceWallet.address,
-    balance,
-    balanceUSDC: Number(formatUnits(balance, 6)),
-  };
+  return sourceState;
 }
 
 export async function getCctpQuote(params: {
@@ -173,12 +160,13 @@ export async function executeCctpBridge(params: {
   onStep?: (step: "preparing" | "approving" | "bridging" | "receiving") => void;
   onSourceTx?: (sourceTxHash: Hash) => Promise<void> | void;
 }) {
-  const sourceWallet = await resolveSourceWallet();
-  if (!sourceWallet) {
+  const requiredAmount = amountToUsdcSubunits(params.amountUSDC);
+  const sourceState = await getSourceBridgeState(requiredAmount);
+  if (!sourceState) {
     throw new Error("Connect your Circle passkey wallet or a supported injected wallet to bridge USDC.");
   }
 
-  if (sourceWallet.address !== params.sourceWallet) {
+  if (sourceState.wallet !== params.sourceWallet) {
     throw new Error("The active source wallet changed. Refresh and try again.");
   }
 
@@ -187,31 +175,63 @@ export async function executeCctpBridge(params: {
     transport: cctpBaseSepoliaTransport,
   });
 
-  if (sourceWallet.kind === "injected") {
-    await ensureSourceChain(sourceWallet.provider);
+  if (sourceState.nativeGasBalance === BigInt(0)) {
+    throw new Error(
+      "You have Base Sepolia USDC, but you need Base Sepolia ETH to pay gas for the bridge transaction.",
+    );
+  }
+
+  if (sourceState.kind === "injected") {
+    if (!sourceState.provider) {
+      throw new Error("Injected wallet provider is unavailable.");
+    }
+
+    await ensureSourceChain(sourceState.provider);
   }
 
   params.onStep?.("preparing");
 
-  params.onStep?.("approving");
-  const approveTxHash = await sourceWallet.walletClient.sendTransaction({
-    account: sourceWallet.walletClient.account!,
-    chain: cctpBaseSepoliaChain,
-    to: sourceChain.usdcAddress,
-    data: encodeFunctionData({
+  const requiredBurnAmount = BigInt(params.quote.totalBurnAmount);
+  const hasAllowance = sourceState.allowance >= requiredBurnAmount;
+
+  if (!hasAllowance) {
+    params.onStep?.("approving");
+    const approveTxHash = await sourceState.walletClient.sendTransaction({
+      account: sourceState.walletClient.account!,
+      chain: cctpBaseSepoliaChain,
+      to: sourceChain.usdcAddress,
+      data: encodeFunctionData({
+        abi: erc20Abi,
+        functionName: "approve",
+        args: [
+          sourceChain.tokenMessengerV2 as Address,
+          requiredBurnAmount,
+        ],
+      }),
+    });
+    const approvalReceipt = await publicClient.waitForTransactionReceipt({
+      hash: approveTxHash,
+    });
+
+    if (approvalReceipt.status !== "success") {
+      throw new Error("USDC approval transaction failed.");
+    }
+
+    const postApprovalAllowance = await publicClient.readContract({
+      address: sourceChain.usdcAddress,
       abi: erc20Abi,
-      functionName: "approve",
-      args: [
-        sourceChain.tokenMessengerV2 as Address,
-        BigInt(params.quote.totalBurnAmount),
-      ],
-    }),
-  });
-  await publicClient.waitForTransactionReceipt({ hash: approveTxHash });
+      functionName: "allowance",
+      args: [sourceState.wallet, sourceChain.tokenMessengerV2 as Address],
+    });
+
+    if (postApprovalAllowance < requiredBurnAmount) {
+      throw new Error("USDC approval did not complete. Try again.");
+    }
+  }
 
   params.onStep?.("bridging");
-  const sourceTxHash = await sourceWallet.walletClient.sendTransaction({
-    account: sourceWallet.walletClient.account!,
+  const sourceTxHash = await sourceState.walletClient.sendTransaction({
+    account: sourceState.walletClient.account!,
     chain: cctpBaseSepoliaChain,
     to: sourceChain.tokenMessengerV2 as Address,
     data: encodeFunctionData({
@@ -246,7 +266,13 @@ export async function executeCctpBridge(params: {
       ],
     }),
   });
-  await publicClient.waitForTransactionReceipt({ hash: sourceTxHash });
+  const bridgeReceipt = await publicClient.waitForTransactionReceipt({
+    hash: sourceTxHash,
+  });
+
+  if (bridgeReceipt.status !== "success") {
+    throw new Error("CCTP bridge transaction failed.");
+  }
   await params.onSourceTx?.(sourceTxHash);
 
   params.onStep?.("receiving");
@@ -362,6 +388,62 @@ async function resolveSourceWallet(): Promise<SourceWalletContext | null> {
     address,
     provider,
     walletClient,
+  };
+}
+
+export async function getSourceBridgeState(
+  requiredAmount: bigint,
+): Promise<SourceBridgeState | null> {
+  const sourceWallet = await resolveSourceWallet();
+  if (!sourceWallet) {
+    return null;
+  }
+
+  const publicClient = createPublicClient({
+    chain: cctpBaseSepoliaChain,
+    transport: cctpBaseSepoliaTransport,
+  });
+
+  const balance = await publicClient.readContract({
+    address: sourceChain.usdcAddress,
+    abi: erc20Abi,
+    functionName: "balanceOf",
+    args: [sourceWallet.address],
+  });
+
+  if (balance < requiredAmount) {
+    return null;
+  }
+
+  const nativeGasBalance = await publicClient.getBalance({
+    address: sourceWallet.address,
+  });
+
+  if (nativeGasBalance === BigInt(0)) {
+    throw new Error(
+      "You have Base Sepolia USDC, but you need Base Sepolia ETH to pay gas for the bridge transaction.",
+    );
+  }
+
+  const allowance = await publicClient.readContract({
+    address: sourceChain.usdcAddress,
+    abi: erc20Abi,
+    functionName: "allowance",
+    args: [sourceWallet.address, sourceChain.tokenMessengerV2 as Address],
+  });
+
+  return {
+    sourceKey,
+    chainName: sourceChain.name,
+    wallet: sourceWallet.address,
+    balance,
+    balanceUSDC: Number(formatUnits(balance, 6)),
+    kind: sourceWallet.kind,
+    walletClient: sourceWallet.walletClient,
+    nativeGasBalance,
+    allowance,
+    needsApproval: allowance < BigInt(requiredAmount),
+    provider: sourceWallet.kind === "injected" ? sourceWallet.provider : undefined,
   };
 }
 
