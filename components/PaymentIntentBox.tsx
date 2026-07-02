@@ -20,7 +20,7 @@ import type { PaymentIntent } from "@/types";
 
 type Props = {
   intent: PaymentIntent;
-  walletAddress: string;
+  walletAddress: Address;
   smartAccount: ModularWalletSession["smartAccount"] | null;
   bundlerClient: ModularWalletSession["bundlerClient"] | null;
   onUnlocked: (resource: PaymentIntent["resource"], txHash: string) => void;
@@ -28,13 +28,30 @@ type Props = {
 
 type Step = "idle" | "paying" | "verifying" | "confirming" | "error";
 
-type ProgressStep =
-  | "Checking balances..."
-  | "Preparing bridge..."
-  | "Bridging USDC..."
-  | "USDC received on Arc..."
-  | "Unlocking resource..."
-  | "Complete";
+const DIRECT_UNLOCK_STEPS = [
+  "Checking balances...",
+  "Arc USDC detected.",
+  "Unlocking resource...",
+  "Complete.",
+] as const;
+
+const BRIDGED_UNLOCK_STEPS = [
+  "Checking balances...",
+  "Preparing bridge...",
+  "Bridging USDC...",
+  "Waiting for Circle attestation...",
+  "USDC received on Arc...",
+  "Unlocking resource...",
+  "Complete.",
+] as const;
+
+type DirectUnlockStep = (typeof DIRECT_UNLOCK_STEPS)[number];
+type BridgedUnlockStep = (typeof BRIDGED_UNLOCK_STEPS)[number];
+type ProgressState =
+  | { flow: "direct"; step: DirectUnlockStep }
+  | { flow: "bridge"; step: BridgedUnlockStep };
+
+type ProgressFlow = ProgressState["flow"];
 
 type BridgePrompt = {
   sourceBalance: SourceUsdcBalance;
@@ -50,7 +67,7 @@ export function PaymentIntentBox({
   onUnlocked,
 }: Props) {
   const [step, setStep] = useState<Step>("idle");
-  const [progress, setProgress] = useState<ProgressStep | null>(null);
+  const [progress, setProgress] = useState<ProgressState | null>(null);
   const [bridgePrompt, setBridgePrompt] = useState<BridgePrompt | null>(null);
   const [bridgeBusy, setBridgeBusy] = useState(false);
   const [txHash, setTxHash] = useState<Hash | null>(null);
@@ -73,24 +90,27 @@ export function PaymentIntentBox({
     setConfirmingMsg("");
     setTxHash(null);
     setBridgeTxHash(null);
-    setProgress("Checking balances...");
+    setDirectProgress("Checking balances...");
     setStep("idle");
 
     try {
-      const requiredAmount = amountToUsdcSubunits(intent.amountUSDC);
+      const requiredAmount = getRequiredUnlockAmount(intent);
+      const requiredAmountUSDC = usdcSubunitsToAmount(requiredAmount);
       const arcBalance = await readArcUsdcBalance(walletAddress);
 
       if (arcBalance >= requiredAmount) {
-        await executeExistingUnlock();
+        setDirectProgress("Arc USDC detected.");
+        await executeExistingUnlock("direct");
         return;
       }
 
+      setBridgeProgress("Preparing bridge...");
       const sourceBalance = await findSupportedSourceBalance(requiredAmount);
       if (!sourceBalance) {
         setProgress(null);
         setStep("error");
         setErrorMsg(
-          `You don't have enough Arc USDC. Add ${intent.amountUSDC.toFixed(2)} USDC on ${cctpDestinationChain.name} or connect a supported source wallet with USDC.`,
+          `You don't have enough Arc USDC. Add ${requiredAmountUSDC.toFixed(2)} USDC on ${cctpDestinationChain.name} or connect a supported source wallet with USDC.`,
         );
         return;
       }
@@ -112,7 +132,7 @@ export function PaymentIntentBox({
       setBridgePrompt({
         sourceBalance,
         quote,
-        amountUSDC: intent.amountUSDC,
+        amountUSDC: requiredAmountUSDC,
       });
       setProgress(null);
     } catch (err: unknown) {
@@ -128,18 +148,30 @@ export function PaymentIntentBox({
     }
 
     setBridgeBusy(true);
-    setStep("paying");
+    setStep("idle");
     setErrorMsg("");
     setBridgeTxHash(null);
-    setProgress("Preparing bridge...");
+    setBridgeProgress("Checking balances...");
 
     let bridge: CctpBridgeExecution | null = null;
     let sourceTxHash: Hash | null = null;
 
     try {
+      const requiredAmount = getRequiredUnlockAmount(intent);
+      const arcBalance = await readArcUsdcBalance(walletAddress);
+
+      if (arcBalance >= requiredAmount) {
+        setBridgePrompt(null);
+        setDirectProgress("Arc USDC detected.");
+        await executeExistingUnlock("direct");
+        return;
+      }
+
+      setStep("paying");
+      setBridgeProgress("Preparing bridge...");
       bridge = await executeCctpBridge({
         sourceWallet: bridgePrompt.sourceBalance.wallet,
-        destinationAddress: walletAddress as Address,
+        destinationAddress: walletAddress,
         amountUSDC: bridgePrompt.amountUSDC,
         quote: bridgePrompt.quote,
         onSourceTx: async (hash) => {
@@ -170,15 +202,15 @@ export function PaymentIntentBox({
         },
         onStep: (bridgeStep) => {
           if (bridgeStep === "preparing" || bridgeStep === "approving") {
-            setProgress("Preparing bridge...");
+            setBridgeProgress("Preparing bridge...");
           }
 
           if (bridgeStep === "bridging") {
-            setProgress("Bridging USDC...");
+            setBridgeProgress("Bridging USDC...");
           }
 
           if (bridgeStep === "receiving") {
-            setProgress("USDC received on Arc...");
+            setBridgeProgress("Waiting for Circle attestation...");
           }
         },
       });
@@ -195,9 +227,9 @@ export function PaymentIntentBox({
       );
 
       setBridgePrompt(null);
-      setProgress("USDC received on Arc...");
-      await waitForArcBalance(amountToUsdcSubunits(intent.amountUSDC));
-      await executeExistingUnlock();
+      setBridgeProgress("USDC received on Arc...");
+      await waitForArcBalance(requiredAmount);
+      await executeExistingUnlock("bridge");
     } catch (err: unknown) {
       setProgress(null);
       setStep("error");
@@ -219,13 +251,13 @@ export function PaymentIntentBox({
     }
   }
 
-  async function executeExistingUnlock() {
+  async function executeExistingUnlock(flow: ProgressFlow) {
     if (!bundlerClient) {
       throw new Error("Active wallet session is not available.");
     }
 
     setStep("paying");
-    setProgress("Unlocking resource...");
+    setUnlockingProgress(flow);
 
     try {
       const hash = await executeUsdcPayment({
@@ -244,7 +276,7 @@ export function PaymentIntentBox({
       setTxHash(hash);
 
       setStep("verifying");
-      setProgress("Unlocking resource...");
+      setUnlockingProgress(flow);
       const result = await postUnlock(
         {
           accessId: intent.accessId,
@@ -256,7 +288,7 @@ export function PaymentIntentBox({
       );
 
       if (result.ok) {
-        setProgress("Complete");
+        setCompleteProgress(flow);
         onUnlocked(result.resource, result.txHash);
         return;
       }
@@ -301,6 +333,32 @@ export function PaymentIntentBox({
     }
 
     throw new Error("Bridge completed but Arc USDC balance was not observed.");
+  }
+
+  function setDirectProgress(step: DirectUnlockStep) {
+    setProgress({ flow: "direct", step });
+  }
+
+  function setBridgeProgress(step: BridgedUnlockStep) {
+    setProgress({ flow: "bridge", step });
+  }
+
+  function setUnlockingProgress(flow: ProgressFlow) {
+    if (flow === "direct") {
+      setDirectProgress("Unlocking resource...");
+      return;
+    }
+
+    setBridgeProgress("Unlocking resource...");
+  }
+
+  function setCompleteProgress(flow: ProgressFlow) {
+    if (flow === "direct") {
+      setDirectProgress("Complete.");
+      return;
+    }
+
+    setBridgeProgress("Complete.");
   }
 
   const isLoading = step === "paying" || step === "verifying" || bridgeBusy;
@@ -355,7 +413,7 @@ export function PaymentIntentBox({
 
       {progress && (
         <div style={progressBoxStyle}>
-          <p style={progressTitleStyle}>{progress}</p>
+          <p style={progressTitleStyle}>{progress.step}</p>
           <ProgressList active={progress} />
         </div>
       )}
@@ -447,7 +505,7 @@ export function PaymentIntentBox({
             }}
           >
             {step === "paying"
-              ? progress ?? "Executing USDC payment..."
+              ? progress?.step ?? "Executing USDC payment..."
               : step === "verifying"
                 ? "Verifying settlement..."
                 : "Pay and unlock"}
@@ -467,16 +525,12 @@ function HashBlock({ label, hash }: { label: string; hash: string }) {
   );
 }
 
-function ProgressList({ active }: { active: ProgressStep }) {
-  const steps: ProgressStep[] = [
-    "Checking balances...",
-    "Preparing bridge...",
-    "Bridging USDC...",
-    "USDC received on Arc...",
-    "Unlocking resource...",
-    "Complete",
-  ];
-  const activeIndex = steps.indexOf(active);
+function ProgressList({ active }: { active: ProgressState }) {
+  const steps = active.flow === "direct" ? DIRECT_UNLOCK_STEPS : BRIDGED_UNLOCK_STEPS;
+  const activeIndex =
+    active.flow === "direct"
+      ? DIRECT_UNLOCK_STEPS.indexOf(active.step)
+      : BRIDGED_UNLOCK_STEPS.indexOf(active.step);
 
   return (
     <div style={progressListStyle}>
@@ -506,6 +560,14 @@ function ProgressList({ active }: { active: ProgressStep }) {
       ))}
     </div>
   );
+}
+
+function getRequiredUnlockAmount(intent: PaymentIntent) {
+  return amountToUsdcSubunits(intent.creatorAmountUSDC + intent.treasuryAmountUSDC);
+}
+
+function usdcSubunitsToAmount(amount: bigint) {
+  return Number(formatUnits(amount, 6));
 }
 
 function ReceiptLine({
