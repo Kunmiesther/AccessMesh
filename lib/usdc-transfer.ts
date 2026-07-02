@@ -8,6 +8,11 @@ import {
   type Address,
   type Hash,
 } from "viem";
+import {
+  UserOperationNotFoundError,
+  UserOperationReceiptNotFoundError,
+  WaitForUserOperationReceiptTimeoutError,
+} from "viem/account-abstraction";
 import { getArcUserOperationGasFees } from "@/lib/arc-gas";
 import type { ModularWalletSession } from "@/lib/modular-wallet";
 
@@ -89,6 +94,19 @@ export async function confirmUsdcPayment(params: {
       };
     }
 
+    const includedOperation = await tryGetUserOperation(
+      params.bundlerClient,
+      params.userOpHash,
+    );
+
+    if (includedOperation) {
+      return {
+        status: "confirmed",
+        userOpHash: params.userOpHash,
+        transactionHash: includedOperation.transactionHash,
+      };
+    }
+
     return {
       status: "pending",
       userOpHash: params.userOpHash,
@@ -136,12 +154,32 @@ async function tryGetUserOperationReceipt(
     return await bundlerClient.getUserOperationReceipt({
       hash: userOpHash,
     });
-  } catch {
-    return null;
+  } catch (error) {
+    if (error instanceof UserOperationReceiptNotFoundError) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+async function tryGetUserOperation(
+  bundlerClient: ModularWalletSession["bundlerClient"],
+  userOpHash: Hash,
+) {
+  try {
+    return await bundlerClient.getUserOperation({
+      hash: userOpHash,
+    });
+  } catch (error) {
+    if (error instanceof UserOperationNotFoundError) {
+      return null;
+    }
+
+    throw error;
   }
 }
 
 function isUserOperationTimeoutError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  return /timed out.*user operation/i.test(message);
+  return error instanceof WaitForUserOperationReceiptTimeoutError;
 }
