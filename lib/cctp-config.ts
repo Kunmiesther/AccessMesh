@@ -1,4 +1,4 @@
-import { ArcTestnet, BaseSepolia } from "@circle-fin/app-kit/chains";
+import { ArcTestnet, BaseSepolia, EthereumSepolia } from "@circle-fin/app-kit/chains";
 import { defineChain, http, type Address, type Chain } from "viem";
 
 export type CctpChainConfig = {
@@ -76,6 +76,37 @@ export const supportedCctpSourceChains = {
     tokenMessengerV2: BaseSepolia.cctp.contracts.v2.tokenMessenger as Address,
     messageTransmitterV2:
       BaseSepolia.cctp.contracts.v2.messageTransmitter as Address,
+    estimatedCompletion: "8-20 seconds after source confirmation",
+  },
+  "ethereum-sepolia": {
+    key: "ethereum-sepolia",
+    chain: defineChain({
+      id: EthereumSepolia.chainId,
+      name: EthereumSepolia.name,
+      nativeCurrency: EthereumSepolia.nativeCurrency,
+      rpcUrls: {
+        default: { http: [...EthereumSepolia.rpcEndpoints] },
+        public: { http: [...EthereumSepolia.rpcEndpoints] },
+      },
+      blockExplorers: {
+        default: {
+          name: "Ethereum Sepolia Explorer",
+          url: "https://sepolia.etherscan.io",
+        },
+      },
+      testnet: true,
+    }),
+    chainId: EthereumSepolia.chainId,
+    domain: EthereumSepolia.cctp.domain,
+    name: EthereumSepolia.name,
+    explorerUrl: EthereumSepolia.explorerUrl,
+    rpcUrls: EthereumSepolia.rpcEndpoints,
+    modularTransportPath: "ethereumSepolia",
+    usdcAddress: EthereumSepolia.usdcAddress as Address,
+    tokenMessengerV2:
+      EthereumSepolia.cctp.contracts.v2.tokenMessenger as Address,
+    messageTransmitterV2:
+      EthereumSepolia.cctp.contracts.v2.messageTransmitter as Address,
     estimatedCompletion: "8-20 seconds after source confirmation",
   },
 } satisfies Record<string, CctpChainConfig>;
