@@ -4,22 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CSSProperties, ReactNode } from "react";
 import { FormEvent, useEffect, useState } from "react";
-import {
-  type Address,
-  type Hash,
-} from "viem";
-import { ArcTestnet } from "@circle-fin/app-kit/chains";
+import { type Address } from "viem";
 import { CoverImageUpload } from "@/components/CoverImageUpload";
 import { Navbar } from "@/components/Navbar";
 import { getPublishFeeConfig, postResource } from "@/lib/api";
-import {
-  assertPublishNativeGasBalance,
-  createPublishBundlerClient,
-} from "@/lib/publish-payment";
-import {
-  confirmUsdcPayment,
-  submitUsdcPayment,
-} from "@/lib/usdc-transfer";
+import { executePublishFeePayment } from "@/lib/publish-payment";
 import { useWallet } from "@/lib/ui/WalletContext";
 import type {
   CreateResourceRequest,
@@ -54,7 +43,6 @@ type PublishState =
   | { status: "preparing" }
   | { status: "awaiting-confirmation" }
   | { status: "paying" }
-  | { status: "confirming"; userOpHash: Hash; message: string }
   | { status: "publishing" }
   | { status: "error"; message: string };
 
@@ -70,8 +58,6 @@ export function CreateResourcePage() {
     useState<PublishFeeConfig | null>(null);
   const [pendingResource, setPendingResource] =
     useState<PendingResourceRequest | null>(null);
-  const [publishUserOpHash, setPublishUserOpHash] = useState<Hash | null>(null);
-  const [checkingPublishStatus, setCheckingPublishStatus] = useState(false);
   const [creatorDisplayName, setCreatorDisplayName] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -130,7 +116,6 @@ export function CreateResourcePage() {
     }
 
     setState({ status: "preparing" });
-    setPublishUserOpHash(null);
 
     try {
       const coverImage = coverImageFile
@@ -198,58 +183,13 @@ export function CreateResourcePage() {
 
     try {
       setState({ status: "paying" });
-      setPublishUserOpHash(null);
-      console.info("[publish] wallet", address);
-      console.info("[publish] treasury wallet", publishFeeConfig.treasuryWallet);
-      console.info("[publish] publish fee", publishFeeConfig.publishFeeUSDC);
-      console.info("[publish] USDC contract", ArcTestnet.usdcAddress);
-      const publishBundlerClient = createPublishBundlerClient({
-        smartAccount,
-      });
-      console.info("[publish] bundler client ready");
-      const activeChainId = await publishBundlerClient.getChainId();
-      console.info("[publish] chain id", activeChainId);
-      console.info(
-        "[publish] transport valid",
-        typeof publishBundlerClient.transport === "function",
-      );
-      console.info("[publish] paymaster mode", publishBundlerClient.paymaster ? "enabled" : "disabled");
-      console.info("[publish] sending user operation");
-      await assertPublishNativeGasBalance({
-        bundlerClient: publishBundlerClient,
+      const confirmation = await executePublishFeePayment({
+        bundlerClient,
         wallet: address,
         treasuryWallet: publishFeeConfig.treasuryWallet as Address,
-        amountUSDC: publishFeeConfig.publishFeeUSDC,
-      });
-      const userOpHash = await submitUsdcPayment({
-        bundlerClient: publishBundlerClient,
-        transfers: [
-          {
-            recipientWallet: publishFeeConfig.treasuryWallet as Address,
-            amountUSDC: publishFeeConfig.publishFeeUSDC,
-          },
-        ],
-      });
-
-      console.info("[publish] userOp hash received", userOpHash);
-      setPublishUserOpHash(userOpHash);
-      console.info("[publish] waiting for receipt");
-
-      const confirmation = await confirmUsdcPayment({
-        bundlerClient: publishBundlerClient,
-        userOpHash,
+        publishFeeUSDC: publishFeeConfig.publishFeeUSDC,
         timeoutMs: PUBLISH_PAYMENT_CONFIRMATION_TIMEOUT_MS,
       });
-
-      if (confirmation.status === "pending") {
-        console.info("[publish] user operation still pending", userOpHash);
-        setState({
-          status: "confirming",
-          userOpHash,
-          message: "Transaction is taking longer than expected.",
-        });
-        return;
-      }
 
       console.info("[publish] confirmed", confirmation.transactionHash);
       setState({ status: "publishing" });
@@ -263,78 +203,13 @@ export function CreateResourcePage() {
       );
 
       console.info("[publish] resource created", response.resource.id);
-      setPublishUserOpHash(null);
       router.replace(`/resource/${response.resource.id}?published=1`);
     } catch (error) {
       console.error("[publish] failed", error);
-      setPublishUserOpHash(null);
       setState({
         status: "error",
         message: getPublishErrorMessage(error),
       });
-    }
-  }
-
-  async function handleCheckPublishStatus() {
-    if (!connected || !address || !smartAccount || !pendingResource) {
-      return;
-    }
-
-    const userOpHash =
-      state.status === "confirming" ? state.userOpHash : publishUserOpHash;
-
-    if (!userOpHash) {
-      setState({
-        status: "error",
-        message: "No pending publish transaction was found.",
-      });
-      return;
-    }
-
-    setCheckingPublishStatus(true);
-    try {
-      const publishBundlerClient = createPublishBundlerClient({ smartAccount });
-      console.info("[publish] checking pending payment status", userOpHash);
-      const confirmation = await confirmUsdcPayment({
-        bundlerClient: publishBundlerClient,
-        userOpHash,
-        timeoutMs: PUBLISH_PAYMENT_CONFIRMATION_TIMEOUT_MS,
-      });
-
-      if (confirmation.status === "pending") {
-        console.info("[publish] still pending", userOpHash);
-        setState({
-          status: "confirming",
-          userOpHash,
-          message: "Transaction is taking longer than expected.",
-        });
-        return;
-      }
-
-      console.info("[publish] confirmed after retry", confirmation.transactionHash);
-      setState({ status: "publishing" });
-      console.info("[publish] creating resource");
-      const response = await postResource(
-        {
-          ...pendingResource,
-          publishTxHash: confirmation.transactionHash,
-        },
-        { wallet: address },
-      );
-
-      console.info("[publish] resource created", response.resource.id);
-      setPublishUserOpHash(null);
-      router.replace(`/resource/${response.resource.id}?published=1`);
-    } catch (error) {
-      console.error("[publish] status check failed", error);
-      setState({
-        status: "confirming",
-        userOpHash,
-        message:
-          error instanceof Error ? error.message : "Could not confirm payment yet.",
-      });
-    } finally {
-      setCheckingPublishStatus(false);
     }
   }
 
@@ -346,8 +221,7 @@ export function CreateResourcePage() {
   const disabled =
     state.status === "preparing" ||
     state.status === "paying" ||
-    state.status === "publishing" ||
-    state.status === "confirming";
+    state.status === "publishing";
   const submitDisabled = disabled || !publishFeeConfig;
   const confirmationOpen =
     state.status === "awaiting-confirmation" ||
@@ -557,35 +431,6 @@ export function CreateResourcePage() {
               <p style={{ ...messageStyle, color: "var(--error)" }}>{state.message}</p>
             )}
 
-            {state.status === "confirming" && (
-              <div style={pendingPaymentStyle}>
-                <p style={pendingPaymentTitleStyle}>
-                  Transaction is taking longer than expected.
-                </p>
-                <p style={pendingPaymentBodyStyle}>
-                  Check status to continue once the payment confirms.
-                </p>
-                <HashBlock label="User operation" hash={state.userOpHash} />
-                <div style={pendingPaymentActionRowStyle}>
-                  <button
-                    type="button"
-                    onClick={handleCheckPublishStatus}
-                    disabled={checkingPublishStatus}
-                    style={{
-                      ...primaryButtonStyle,
-                      background: checkingPublishStatus
-                        ? "var(--border)"
-                        : "var(--accent)",
-                      color: checkingPublishStatus ? "var(--text-muted)" : "#000",
-                      cursor: checkingPublishStatus ? "not-allowed" : "pointer",
-                    }}
-                  >
-                    {checkingPublishStatus ? "Checking status..." : "Check status"}
-                  </button>
-                </div>
-              </div>
-            )}
-
             <div style={actionsStyle}>
               <Link href="/dashboard" style={secondaryButtonStyle}>
                 Cancel
@@ -603,16 +448,12 @@ export function CreateResourcePage() {
                 {state.status === "preparing"
                   ? "Preparing..."
                   : state.status === "paying"
-                    ? publishUserOpHash
-                      ? "Waiting for confirmation..."
-                      : "Submitting payment..."
+                    ? "Submitting payment..."
                     : state.status === "publishing"
                       ? "Payment confirmed. Publishing resource..."
-                      : state.status === "confirming"
-                        ? "Transaction is pending..."
-                        : publishFeeConfig
-                          ? "Publish"
-                          : "Loading publish fee..."}
+                      : publishFeeConfig
+                        ? "Publish"
+                        : "Loading publish fee..."}
               </button>
             </div>
           </form>

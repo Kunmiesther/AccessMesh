@@ -1,60 +1,156 @@
 import { ArcTestnet } from "@circle-fin/app-kit/chains";
 import {
-  toModularTransport,
-} from "@circle-fin/modular-wallets-core";
-import { createPublicClient, encodeFunctionData, erc20Abi, parseUnits, type Address, type PublicClient } from "viem";
-import { createBundlerClient, type BundlerClient } from "viem/account-abstraction";
-import { arcTestnet } from "viem/chains";
+  encodeFunctionData,
+  erc20Abi,
+  isAddress,
+  parseUnits,
+  type Address,
+  type Hash,
+  type PublicClient,
+} from "viem";
 import { getArcUserOperationGasFees } from "@/lib/arc-gas";
 import type { ModularWalletSession } from "@/lib/modular-wallet";
+import {
+  confirmUsdcPayment,
+  submitUsdcPayment,
+} from "@/lib/usdc-transfer";
 
-const MODULAR_WALLET_CHAIN_PATH = "arcTestnet";
+export function assertPublishEnvironment() {
+  if (!process.env.NEXT_PUBLIC_CLIENT_KEY) {
+    throw new Error("Circle client key is missing.");
+  }
 
-export type PublishBundlerClient = BundlerClient & {
-  client: PublicClient;
-};
+  if (!process.env.NEXT_PUBLIC_CLIENT_URL) {
+    throw new Error("Circle client URL is missing.");
+  }
+}
 
-export function createPublishBundlerClient(session: {
-  smartAccount: ModularWalletSession["smartAccount"];
-}) {
-  const { clientKey, clientUrl } = getClientEnv();
-  const transport = toModularTransport(getChainClientUrl(clientUrl), clientKey);
+export function isPublishTransportValid(
+  bundlerClient: NonNullable<ModularWalletSession["bundlerClient"]>,
+) {
+  return (
+    typeof bundlerClient.transport === "function" &&
+    typeof bundlerClient.client?.transport === "function"
+  );
+}
 
-  if (typeof transport !== "function") {
+export function assertPublishClientReady(
+  bundlerClient: NonNullable<ModularWalletSession["bundlerClient"]>,
+) {
+  if (typeof bundlerClient.transport !== "function") {
     throw new Error("Publish transport is invalid.");
   }
 
-  const publicClient = createPublicClient({
-    chain: arcTestnet,
-    transport,
-  });
-
-  const bundlerClient = createBundlerClient({
-    account: session.smartAccount,
-    chain: arcTestnet,
-    client: publicClient,
-    transport,
-  });
-
-  if (bundlerClient.paymaster) {
-    throw new Error("Publish paymaster sponsorship must be disabled.");
+  if (!bundlerClient.client) {
+    throw new Error("Publish bundler client is malformed.");
   }
 
-  return bundlerClient as PublishBundlerClient;
+  if (typeof bundlerClient.client.transport !== "function") {
+    throw new Error("Publish Arc client transport is invalid.");
+  }
+
+  if (
+    typeof bundlerClient.sendUserOperation !== "function" ||
+    typeof bundlerClient.waitForUserOperationReceipt !== "function" ||
+    typeof bundlerClient.getUserOperationReceipt !== "function" ||
+    typeof bundlerClient.getUserOperation !== "function"
+  ) {
+    throw new Error("Publish bundler client is malformed.");
+  }
+}
+
+export function getPublishPaymasterMode(
+  bundlerClient: NonNullable<ModularWalletSession["bundlerClient"]>,
+) {
+  return bundlerClient.paymaster ? "enabled" : "disabled";
+}
+
+export async function executePublishFeePayment(params: {
+  bundlerClient: NonNullable<ModularWalletSession["bundlerClient"]>;
+  wallet: Address;
+  treasuryWallet: Address;
+  publishFeeUSDC: number;
+  timeoutMs?: number;
+}): Promise<{ userOpHash: Hash; transactionHash: Hash }> {
+  assertPublishEnvironment();
+
+  console.info("[publish] wallet", params.wallet);
+  console.info("[publish] treasury wallet", params.treasuryWallet);
+  console.info("[publish] publish fee", params.publishFeeUSDC);
+  console.info("[publish] USDC contract", ArcTestnet.usdcAddress);
+
+  if (!isAddress(params.wallet)) {
+    throw new Error("Publish wallet address is invalid.");
+  }
+
+  if (!isAddress(params.treasuryWallet)) {
+    throw new Error("Publish treasury wallet is invalid.");
+  }
+
+  if (!Number.isFinite(params.publishFeeUSDC) || params.publishFeeUSDC <= 0) {
+    throw new Error("Publish fee is invalid.");
+  }
+
+  const transportValid = isPublishTransportValid(params.bundlerClient);
+  console.info("[publish] transport valid", transportValid);
+  if (!transportValid) {
+    throw new Error("Publish transport is invalid.");
+  }
+
+  assertPublishClientReady(params.bundlerClient);
+
+  const activeChainId = await params.bundlerClient.getChainId();
+  console.info("[publish] Arc chain id", activeChainId);
+  if (activeChainId !== ArcTestnet.chainId) {
+    throw new Error(`Publishing must run on Arc. Active chain id: ${activeChainId}.`);
+  }
+
+  await assertPublishNativeGasBalance({
+    bundlerClient: params.bundlerClient,
+    wallet: params.wallet,
+    treasuryWallet: params.treasuryWallet,
+    amountUSDC: params.publishFeeUSDC,
+  });
+
+  console.info("[publish] sending publish fee");
+  const userOpHash = await submitUsdcPayment({
+    bundlerClient: params.bundlerClient,
+    transfers: [
+      {
+        recipientWallet: params.treasuryWallet,
+        amountUSDC: params.publishFeeUSDC,
+      },
+    ],
+  });
+
+  const confirmation = await confirmUsdcPayment({
+    bundlerClient: params.bundlerClient,
+    userOpHash,
+    timeoutMs: params.timeoutMs,
+  });
+
+  if (confirmation.status !== "confirmed") {
+    throw new Error("Transaction submitted but still pending.");
+  }
+
+  return {
+    userOpHash,
+    transactionHash: confirmation.transactionHash,
+  };
 }
 
 export async function assertPublishNativeGasBalance(params: {
-  bundlerClient: PublishBundlerClient;
+  bundlerClient: NonNullable<ModularWalletSession["bundlerClient"]>;
   wallet: Address;
   treasuryWallet: Address;
   amountUSDC: number;
 }) {
-  if (!params.wallet) {
-    throw new Error("Publish wallet address is unavailable.");
+  if (!isAddress(params.wallet)) {
+    throw new Error("Publish wallet address is invalid.");
   }
 
-  if (!params.treasuryWallet) {
-    throw new Error("Publish treasury wallet is unavailable.");
+  if (!isAddress(params.treasuryWallet)) {
+    throw new Error("Publish treasury wallet is invalid.");
   }
 
   if (!Number.isFinite(params.amountUSDC) || params.amountUSDC <= 0) {
@@ -62,14 +158,11 @@ export async function assertPublishNativeGasBalance(params: {
   }
 
   const chainId = await params.bundlerClient.getChainId();
-  if (chainId !== arcTestnet.id) {
+  if (chainId !== ArcTestnet.chainId) {
     throw new Error(`Publishing must run on Arc. Active chain id: ${chainId}.`);
   }
 
-  const publicClient = params.bundlerClient.client;
-  if (!publicClient) {
-    throw new Error("Publish Arc client is unavailable.");
-  }
+  const publicClient = getPublishPublicClient(params.bundlerClient);
 
   const nativeGasBalance = await publicClient.getBalance({
     address: params.wallet,
@@ -107,17 +200,17 @@ export async function assertPublishNativeGasBalance(params: {
   }
 }
 
-function getClientEnv() {
-  const clientKey = process.env.NEXT_PUBLIC_CLIENT_KEY;
-  const clientUrl = process.env.NEXT_PUBLIC_CLIENT_URL;
-
-  if (!clientKey || !clientUrl) {
-    throw new Error("Missing NEXT_PUBLIC_CLIENT_KEY or NEXT_PUBLIC_CLIENT_URL.");
+function getPublishPublicClient(
+  bundlerClient: NonNullable<ModularWalletSession["bundlerClient"]>,
+) {
+  const publicClient = bundlerClient.client as PublicClient | undefined;
+  if (!publicClient) {
+    throw new Error("Publish Arc client is unavailable.");
   }
 
-  return { clientKey, clientUrl };
-}
+  if (typeof publicClient.getBalance !== "function") {
+    throw new Error("Publish Arc client is invalid.");
+  }
 
-function getChainClientUrl(clientUrl: string) {
-  return `${clientUrl.replace(/\/+$/, "")}/${MODULAR_WALLET_CHAIN_PATH}`;
+  return publicClient;
 }
