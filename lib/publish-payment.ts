@@ -29,24 +29,31 @@ export function isPublishTransportValid(
   bundlerClient: NonNullable<ModularWalletSession["bundlerClient"]>,
 ) {
   return (
-    typeof bundlerClient.transport === "function" &&
-    typeof bundlerClient.client?.transport === "function"
+    Boolean(bundlerClient.account) &&
+    Boolean(bundlerClient.client) &&
+    typeof bundlerClient.getChainId === "function" &&
+    typeof bundlerClient.sendUserOperation === "function" &&
+    typeof bundlerClient.waitForUserOperationReceipt === "function" &&
+    typeof bundlerClient.getUserOperationReceipt === "function" &&
+    typeof bundlerClient.getUserOperation === "function" &&
+    typeof bundlerClient.client?.getBalance === "function" &&
+    typeof bundlerClient.client?.estimateFeesPerGas === "function"
   );
 }
 
 export function assertPublishClientReady(
   bundlerClient: NonNullable<ModularWalletSession["bundlerClient"]>,
 ) {
-  if (typeof bundlerClient.transport !== "function") {
-    throw new Error("Publish transport is invalid.");
+  if (!bundlerClient.account) {
+    throw new Error("Publish smart account is unavailable.");
   }
 
   if (!bundlerClient.client) {
     throw new Error("Publish bundler client is malformed.");
   }
 
-  if (typeof bundlerClient.client.transport !== "function") {
-    throw new Error("Publish Arc client transport is invalid.");
+  if (typeof bundlerClient.getChainId !== "function") {
+    throw new Error("Publish transport is invalid.");
   }
 
   if (
@@ -56,6 +63,13 @@ export function assertPublishClientReady(
     typeof bundlerClient.getUserOperation !== "function"
   ) {
     throw new Error("Publish bundler client is malformed.");
+  }
+
+  if (
+    typeof bundlerClient.client.getBalance !== "function" ||
+    typeof bundlerClient.client.estimateFeesPerGas !== "function"
+  ) {
+    throw new Error("Publish Arc client is invalid.");
   }
 }
 
