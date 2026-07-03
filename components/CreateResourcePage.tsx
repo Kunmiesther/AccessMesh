@@ -48,11 +48,11 @@ type PublishState =
 
 type PendingResourceRequest = Omit<CreateResourceRequest, "publishTxHash">;
 
-const PUBLISH_PAYMENT_CONFIRMATION_TIMEOUT_MS = 120_000;
+const PUBLISH_PAYMENT_CONFIRMATION_TIMEOUT_MS = 300_000;
 
 export function CreateResourcePage() {
   const router = useRouter();
-  const { connected, ready, address, smartAccount, bundlerClient } = useWallet();
+  const { connected, ready, address, bundlerClient } = useWallet();
   const [state, setState] = useState<PublishState>({ status: "idle" });
   const [publishFeeConfig, setPublishFeeConfig] =
     useState<PublishFeeConfig | null>(null);
@@ -109,6 +109,7 @@ export function CreateResourcePage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    console.info("STEP 1 Publish clicked");
 
     if (!connected || !address) {
       router.push("/wallet?next=/create");
@@ -156,7 +157,7 @@ export function CreateResourcePage() {
       return;
     }
 
-    if (!smartAccount || !bundlerClient) {
+    if (!bundlerClient || !bundlerClient.account) {
       setState({
         status: "error",
         message:
@@ -183,6 +184,7 @@ export function CreateResourcePage() {
 
     try {
       setState({ status: "paying" });
+      console.info("STEP 2 Preparing payment");
       const confirmation = await executePublishFeePayment({
         bundlerClient,
         wallet: address,
@@ -191,9 +193,8 @@ export function CreateResourcePage() {
         timeoutMs: PUBLISH_PAYMENT_CONFIRMATION_TIMEOUT_MS,
       });
 
-      console.info("[publish] confirmed", confirmation.transactionHash);
       setState({ status: "publishing" });
-      console.info("[publish] creating resource");
+      console.info("STEP 8 Creating resource");
       const response = await postResource(
         {
           ...pendingResource,
@@ -202,7 +203,7 @@ export function CreateResourcePage() {
         { wallet: address },
       );
 
-      console.info("[publish] resource created", response.resource.id);
+      console.info("STEP 9 Resource created", response.resource.id);
       router.replace(`/resource/${response.resource.id}?published=1`);
     } catch (error) {
       console.error("[publish] failed", error);
