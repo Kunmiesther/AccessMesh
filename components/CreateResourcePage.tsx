@@ -5,25 +5,21 @@ import { useRouter } from "next/navigation";
 import type { CSSProperties, ReactNode } from "react";
 import { FormEvent, useEffect, useState } from "react";
 import {
-  encodeFunctionData,
-  erc20Abi,
-  parseUnits,
   type Address,
   type Hash,
-  type Transport,
 } from "viem";
-import { createBundlerClient } from "viem/account-abstraction";
 import { CoverImageUpload } from "@/components/CoverImageUpload";
 import { Navbar } from "@/components/Navbar";
-import { getArcUserOperationGasFees } from "@/lib/arc-gas";
-import { ArcTestnet } from "@circle-fin/app-kit/chains";
 import { getPublishFeeConfig, postResource } from "@/lib/api";
+import {
+  assertPublishNativeGasBalance,
+  createPublishBundlerClient,
+} from "@/lib/publish-payment";
 import {
   confirmUsdcPayment,
   submitUsdcPayment,
 } from "@/lib/usdc-transfer";
 import { useWallet } from "@/lib/ui/WalletContext";
-import type { ModularWalletSession } from "@/lib/modular-wallet";
 import type {
   CreateResourceRequest,
   PublishedResourceType,
@@ -202,11 +198,17 @@ export function CreateResourcePage() {
     try {
       setState({ status: "paying" });
       setPublishUserOpHash(null);
-      console.info("[publish] sending publish fee");
+      console.info("[publish] wallet", address);
+      console.info("[publish] treasury wallet", publishFeeConfig.treasuryWallet);
+      console.info("[publish] publish fee", publishFeeConfig.publishFeeUSDC);
       const publishBundlerClient = createPublishBundlerClient({
-        bundlerClient,
         smartAccount,
       });
+      const activeChainId = await publishBundlerClient.getChainId();
+      console.info("[publish] chain id", activeChainId);
+      console.info("[publish] transport valid", true);
+      console.info("[publish] paymaster disabled", !publishBundlerClient.paymaster);
+      console.info("[publish] sending user operation");
       await assertPublishNativeGasBalance({
         bundlerClient: publishBundlerClient,
         wallet: address,
@@ -243,7 +245,7 @@ export function CreateResourcePage() {
         return;
       }
 
-      console.info("[publish] receipt confirmed", confirmation.transactionHash);
+      console.info("[publish] confirmed", confirmation.transactionHash);
       setState({ status: "publishing" });
       console.info("[publish] creating resource");
       const response = await postResource(
@@ -268,7 +270,7 @@ export function CreateResourcePage() {
   }
 
   async function handleCheckPublishStatus() {
-    if (!connected || !address || !bundlerClient || !pendingResource) {
+    if (!connected || !address || !smartAccount || !pendingResource) {
       return;
     }
 
@@ -285,10 +287,7 @@ export function CreateResourcePage() {
 
     setCheckingPublishStatus(true);
     try {
-      const publishBundlerClient = createPublishBundlerClient({
-        bundlerClient,
-        smartAccount,
-      });
+      const publishBundlerClient = createPublishBundlerClient({ smartAccount });
       console.info("[publish] checking pending payment status", userOpHash);
       const confirmation = await confirmUsdcPayment({
         bundlerClient: publishBundlerClient,
@@ -306,7 +305,7 @@ export function CreateResourcePage() {
         return;
       }
 
-      console.info("[publish] receipt confirmed after retry", confirmation.transactionHash);
+      console.info("[publish] confirmed after retry", confirmation.transactionHash);
       setState({ status: "publishing" });
       console.info("[publish] creating resource");
       const response = await postResource(
@@ -792,68 +791,6 @@ function readFileAsDataUrl(file: File) {
     reader.onerror = () => reject(new Error("Resource file could not be read."));
     reader.readAsDataURL(file);
   });
-}
-
-function createPublishBundlerClient(params: {
-  bundlerClient: NonNullable<ModularWalletSession["bundlerClient"]>;
-  smartAccount: NonNullable<ModularWalletSession["smartAccount"]>;
-}) {
-  return createBundlerClient({
-    account: params.smartAccount,
-    chain: params.bundlerClient.chain,
-    client: params.bundlerClient.client,
-    transport: params.bundlerClient.transport as unknown as Transport,
-  });
-}
-
-async function assertPublishNativeGasBalance(params: {
-  bundlerClient: ReturnType<typeof createPublishBundlerClient>;
-  wallet: Address;
-  treasuryWallet: Address;
-  amountUSDC: number;
-}) {
-  const nativeGasBalance = await params.bundlerClient.client.getBalance({
-    address: params.wallet,
-  });
-
-  if (nativeGasBalance === BigInt(0)) {
-    throw new Error("You need Arc testnet gas to publish this resource.");
-  }
-
-  const gasFees = await getArcUserOperationGasFees(params.bundlerClient.client);
-  const publishGasEstimate = await params.bundlerClient.estimateUserOperationGas({
-    calls: [buildPublishTransferCall({
-      treasuryWallet: params.treasuryWallet,
-      amountUSDC: params.amountUSDC,
-    })],
-  });
-
-  const estimatedGasCost =
-    (publishGasEstimate.preVerificationGas +
-      publishGasEstimate.verificationGasLimit +
-      publishGasEstimate.callGasLimit +
-      (publishGasEstimate.paymasterVerificationGasLimit ?? BigInt(0)) +
-      (publishGasEstimate.paymasterPostOpGasLimit ?? BigInt(0))) *
-    gasFees.maxFeePerGas;
-
-  if (nativeGasBalance < estimatedGasCost) {
-    throw new Error("You need Arc testnet gas to publish this resource.");
-  }
-}
-
-function buildPublishTransferCall(params: {
-  treasuryWallet: Address;
-  amountUSDC: number;
-}) {
-  return {
-    to: ArcTestnet.usdcAddress as Address,
-    data: encodeFunctionData({
-      abi: erc20Abi,
-      functionName: "transfer",
-      args: [params.treasuryWallet, parseUnits(params.amountUSDC.toString(), 6)],
-    }),
-    value: BigInt(0),
-  };
 }
 
 const eyebrowStyle = {
