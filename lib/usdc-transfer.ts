@@ -512,16 +512,6 @@ function summarizeUnlockUserOperationRequest(params: {
       typeof params.request.verificationGasLimit === "bigint"
         ? params.request.verificationGasLimit.toString()
         : params.request.verificationGasLimit ?? null,
-    paymaster: params.request.paymaster ?? null,
-    paymasterData: params.request.paymasterData ?? null,
-    paymasterVerificationGasLimit:
-      typeof params.request.paymasterVerificationGasLimit === "bigint"
-        ? params.request.paymasterVerificationGasLimit.toString()
-        : params.request.paymasterVerificationGasLimit ?? null,
-    paymasterPostOpGasLimit:
-      typeof params.request.paymasterPostOpGasLimit === "bigint"
-        ? params.request.paymasterPostOpGasLimit.toString()
-        : params.request.paymasterPostOpGasLimit ?? null,
   };
 }
 
