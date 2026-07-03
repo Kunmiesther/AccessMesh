@@ -8,6 +8,7 @@ import {
   type Address,
   type Hash,
 } from "viem";
+import { ArcTestnet } from "@circle-fin/app-kit/chains";
 import { CoverImageUpload } from "@/components/CoverImageUpload";
 import { Navbar } from "@/components/Navbar";
 import { getPublishFeeConfig, postResource } from "@/lib/api";
@@ -99,7 +100,7 @@ export function CreateResourcePage() {
     getPublishFeeConfig()
       .then((response) => {
         if (!cancelled) {
-          console.info("[publish] fee config loaded");
+          console.info("[publish] publish fee loaded");
           setPublishFeeConfig(response.config);
         }
       })
@@ -201,13 +202,18 @@ export function CreateResourcePage() {
       console.info("[publish] wallet", address);
       console.info("[publish] treasury wallet", publishFeeConfig.treasuryWallet);
       console.info("[publish] publish fee", publishFeeConfig.publishFeeUSDC);
+      console.info("[publish] USDC contract", ArcTestnet.usdcAddress);
       const publishBundlerClient = createPublishBundlerClient({
         smartAccount,
       });
+      console.info("[publish] bundler client ready");
       const activeChainId = await publishBundlerClient.getChainId();
       console.info("[publish] chain id", activeChainId);
-      console.info("[publish] transport valid", true);
-      console.info("[publish] paymaster disabled", !publishBundlerClient.paymaster);
+      console.info(
+        "[publish] transport valid",
+        typeof publishBundlerClient.transport === "function",
+      );
+      console.info("[publish] paymaster mode", publishBundlerClient.paymaster ? "enabled" : "disabled");
       console.info("[publish] sending user operation");
       await assertPublishNativeGasBalance({
         bundlerClient: publishBundlerClient,
