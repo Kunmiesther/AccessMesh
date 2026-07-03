@@ -1,8 +1,12 @@
 "use client";
 
 import { ArcTestnet } from "@circle-fin/app-kit/chains";
+import {
+  toModularTransport,
+} from "@circle-fin/modular-wallets-core";
 import { createBundlerClient } from "viem/account-abstraction";
 import {
+  createPublicClient,
   encodeFunctionData,
   erc20Abi,
   parseUnits,
@@ -12,10 +16,12 @@ import {
 import { WaitForUserOperationReceiptTimeoutError } from "viem/account-abstraction";
 import { getArcUserOperationGasFees } from "@/lib/arc-gas";
 import type { ModularWalletSession } from "@/lib/modular-wallet";
+import { arcTestnet } from "viem/chains";
 
 export const USDC_PAYMENT_CONFIRMATION_TIMEOUT_MS = 120_000;
 const UNLOCK_OPERATION_TIMEOUT_MS = 120_000;
 const UNLOCK_LOOKUP_TIMEOUT_MS = 15_000;
+const MODULAR_WALLET_CHAIN_PATH = "arcTestnet";
 
 export type UsdcPaymentConfirmation =
   {
@@ -62,7 +68,6 @@ export async function submitUsdcPayment(params: {
   }
 
   const directBundlerClient = createDirectUnlockBundlerClient(
-    params.bundlerClient,
     account,
   );
 
@@ -395,15 +400,39 @@ function isPresent(value: unknown) {
 }
 
 function createDirectUnlockBundlerClient(
-  bundlerClient: UsdcBundlerClient,
   account: NonNullable<UsdcBundlerClient["account"]>,
 ) {
+  const { clientKey, clientUrl } = getClientEnv();
+  const modularTransport = toModularTransport(
+    getChainClientUrl(clientUrl),
+    clientKey,
+  );
+  const publicClient = createPublicClient({
+    chain: arcTestnet,
+    transport: modularTransport,
+  });
+
   return createBundlerClient({
     account,
-    chain: bundlerClient.chain,
-    client: bundlerClient.client,
-    transport: bundlerClient.transport as never,
+    chain: arcTestnet,
+    client: publicClient,
+    transport: modularTransport,
   });
+}
+
+function getClientEnv() {
+  const clientKey = process.env.NEXT_PUBLIC_CLIENT_KEY;
+  const clientUrl = process.env.NEXT_PUBLIC_CLIENT_URL;
+
+  if (!clientKey || !clientUrl) {
+    throw new Error("Missing NEXT_PUBLIC_CLIENT_KEY or NEXT_PUBLIC_CLIENT_URL.");
+  }
+
+  return { clientKey, clientUrl };
+}
+
+function getChainClientUrl(clientUrl: string) {
+  return `${clientUrl.replace(/\/+$/, "")}/${MODULAR_WALLET_CHAIN_PATH}`;
 }
 
 function stripUnlockPaymasterFields<T extends Record<string, unknown>>(request: T) {
