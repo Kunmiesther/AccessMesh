@@ -16,7 +16,9 @@ import {
 import { getArcUserOperationGasFees } from "@/lib/arc-gas";
 import type { ModularWalletSession } from "@/lib/modular-wallet";
 
-export const USDC_PAYMENT_CONFIRMATION_TIMEOUT_MS = 300_000;
+export const USDC_PAYMENT_CONFIRMATION_TIMEOUT_MS = 120_000;
+const UNLOCK_OPERATION_TIMEOUT_MS = 120_000;
+const UNLOCK_LOOKUP_TIMEOUT_MS = 15_000;
 
 export type UsdcPaymentConfirmation =
   | {
@@ -62,7 +64,12 @@ export async function submitUsdcPayment(params: {
     throw new Error("Publish smart account is unavailable.");
   }
 
-  const gasFees = await getArcUserOperationGasFees();
+  const gasFees = await withTimeout(
+    getArcUserOperationGasFees(),
+    UNLOCK_OPERATION_TIMEOUT_MS,
+    "unlock gas estimation",
+  );
+
   if (params.logPrefix === "publish") {
     const chainId = await params.bundlerClient.getChainId();
     console.info("[publish] ACTIVE SEND PAYLOAD", {
@@ -77,12 +84,22 @@ export async function submitUsdcPayment(params: {
     });
   }
 
-  return params.bundlerClient.sendUserOperation({
-    account,
-    calls,
-    maxPriorityFeePerGas: gasFees.maxPriorityFeePerGas,
-    maxFeePerGas: gasFees.maxFeePerGas,
-  });
+  console.info("UNLOCK STEP 4 Sending unlock UserOperation");
+
+  const userOpHash = await withTimeout(
+    params.bundlerClient.sendUserOperation({
+      account,
+      calls,
+      maxPriorityFeePerGas: gasFees.maxPriorityFeePerGas,
+      maxFeePerGas: gasFees.maxFeePerGas,
+    }),
+    UNLOCK_OPERATION_TIMEOUT_MS,
+    "unlock sendUserOperation",
+  );
+
+  console.info("UNLOCK STEP 5 UserOperation hash received", userOpHash);
+
+  return userOpHash;
 }
 
 export async function confirmUsdcPayment(params: {
@@ -93,10 +110,15 @@ export async function confirmUsdcPayment(params: {
   const timeoutMs = params.timeoutMs ?? USDC_PAYMENT_CONFIRMATION_TIMEOUT_MS;
 
   try {
-    const receipt = await params.bundlerClient.waitForUserOperationReceipt({
-      hash: params.userOpHash,
-      timeout: timeoutMs,
-    });
+    console.info("UNLOCK STEP 6 Waiting for confirmation");
+    const receipt = await withTimeout(
+      params.bundlerClient.waitForUserOperationReceipt({
+        hash: params.userOpHash,
+        timeout: timeoutMs,
+      }),
+      timeoutMs,
+      "unlock waitForUserOperationReceipt",
+    );
 
     if (!receipt.success) {
       throw new Error(receipt.reason ?? "USDC payment user operation reverted.");
@@ -108,7 +130,7 @@ export async function confirmUsdcPayment(params: {
       transactionHash: receipt.receipt.transactionHash,
     };
   } catch (error) {
-    if (!isUserOperationTimeoutError(error)) {
+    if (!isUserOperationTimeoutError(error) && !isUnlockTimeoutError(error)) {
       throw error;
     }
 
@@ -116,6 +138,11 @@ export async function confirmUsdcPayment(params: {
       params.bundlerClient,
       params.userOpHash,
     );
+
+    console.info("UNLOCK STEP 6 Receipt lookup after timeout", {
+      userOpHash: params.userOpHash,
+      getUserOperationReceipt: Boolean(confirmation),
+    });
 
     if (confirmation) {
       return {
@@ -130,6 +157,11 @@ export async function confirmUsdcPayment(params: {
       params.userOpHash,
     );
 
+    console.info("UNLOCK STEP 6 Operation lookup after timeout", {
+      userOpHash: params.userOpHash,
+      getUserOperation: Boolean(includedOperation),
+    });
+
     if (includedOperation) {
       return {
         status: "confirmed",
@@ -143,26 +175,6 @@ export async function confirmUsdcPayment(params: {
       userOpHash: params.userOpHash,
     };
   }
-}
-
-export async function executeUsdcPayment(params: {
-  bundlerClient: UsdcBundlerClient;
-  transfers: Array<{
-    recipientWallet: Address;
-    amountUSDC: number;
-  }>;
-}): Promise<Hash> {
-  const userOpHash = await submitUsdcPayment(params);
-  const confirmation = await confirmUsdcPayment({
-    bundlerClient: params.bundlerClient,
-    userOpHash,
-  });
-
-  if (confirmation.status !== "confirmed") {
-    throw new Error("Transaction submitted but still pending.");
-  }
-
-  return confirmation.transactionHash;
 }
 
 function buildTransferCall(recipientWallet: Address, amountUSDC: number) {
@@ -182,11 +194,18 @@ async function tryGetUserOperationReceipt(
   userOpHash: Hash,
 ) {
   try {
-    return await bundlerClient.getUserOperationReceipt({
-      hash: userOpHash,
-    });
+    return await withTimeout(
+      bundlerClient.getUserOperationReceipt({
+        hash: userOpHash,
+      }),
+      UNLOCK_LOOKUP_TIMEOUT_MS,
+      "unlock getUserOperationReceipt",
+    );
   } catch (error) {
-    if (error instanceof UserOperationReceiptNotFoundError) {
+    if (
+      error instanceof UserOperationReceiptNotFoundError ||
+      isUnlockTimeoutError(error)
+    ) {
       return null;
     }
 
@@ -199,11 +218,18 @@ async function tryGetUserOperation(
   userOpHash: Hash,
 ) {
   try {
-    return await bundlerClient.getUserOperation({
-      hash: userOpHash,
-    });
+    return await withTimeout(
+      bundlerClient.getUserOperation({
+        hash: userOpHash,
+      }),
+      UNLOCK_LOOKUP_TIMEOUT_MS,
+      "unlock getUserOperation",
+    );
   } catch (error) {
-    if (error instanceof UserOperationNotFoundError) {
+    if (
+      error instanceof UserOperationNotFoundError ||
+      isUnlockTimeoutError(error)
+    ) {
       return null;
     }
 
@@ -213,4 +239,35 @@ async function tryGetUserOperation(
 
 function isUserOperationTimeoutError(error: unknown) {
   return error instanceof WaitForUserOperationReceiptTimeoutError;
+}
+
+function isUnlockTimeoutError(error: unknown) {
+  return (
+    error instanceof Error &&
+    (error.name === "TimeoutError" ||
+      /timed out/i.test(error.message))
+  );
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 }

@@ -12,6 +12,8 @@ import { useWallet } from "@/lib/ui/WalletContext";
 import { getAccessIntent } from "@/lib/api";
 import type { PaymentIntent, ResourceMeta } from "@/types";
 
+const ACCESS_INTENT_TIMEOUT_MS = 30_000;
+
 type PageState =
   | { phase: "no-wallet" }
   | { phase: "idle" }
@@ -51,7 +53,11 @@ export default function AccessPage() {
     setState({ phase: "loading-intent" });
 
     try {
-      const res = await getAccessIntent(id, address);
+      const res = await withTimeout(
+        getAccessIntent(id, address),
+        ACCESS_INTENT_TIMEOUT_MS,
+        "access intent",
+      );
       if (res.ok) {
         setState({ phase: "ready", intent: res.paymentIntent });
       } else {
@@ -334,6 +340,29 @@ export default function AccessPage() {
       `}</style>
     </div>
   );
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timeoutId: number | undefined;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = window.setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) {
+      window.clearTimeout(timeoutId);
+    }
+  }
 }
 
 function Skeleton({ height }: { height: number }) {

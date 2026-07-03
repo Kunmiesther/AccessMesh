@@ -21,6 +21,9 @@ import {
 } from "@/lib/usdc-transfer";
 import type { PaymentIntent } from "@/types";
 
+const UNLOCK_READ_TIMEOUT_MS = 45_000;
+const UNLOCK_POST_TIMEOUT_MS = 120_000;
+
 type Props = {
   intent: PaymentIntent;
   walletAddress: Address;
@@ -104,9 +107,21 @@ export function PaymentIntentBox({
     try {
       const requiredAmount = getRequiredUnlockAmount(intent);
       const requiredAmountUSDC = usdcSubunitsToAmount(requiredAmount);
-      const arcBalance = await readArcUsdcBalance(walletAddress);
+      const arcBalance = await withTimeout(
+        readArcUsdcBalance(walletAddress),
+        UNLOCK_READ_TIMEOUT_MS,
+        "unlock readArcUsdcBalance",
+      );
+      console.info("UNLOCK STEP 1 Balance check complete", {
+        wallet: walletAddress,
+        balance: arcBalance.toString(),
+      });
 
       if (arcBalance >= requiredAmount) {
+        console.info("UNLOCK STEP 2 Arc USDC detected", {
+          wallet: walletAddress,
+          balance: arcBalance.toString(),
+        });
         setDirectProgress("Arc USDC detected.");
         await executeExistingUnlock("direct");
         return;
@@ -259,6 +274,10 @@ export function PaymentIntentBox({
     setUnlockingProgress(flow);
 
     try {
+      console.info("UNLOCK STEP 3 Building unlock UserOperation", {
+        wallet: walletAddress,
+        resourceId: intent.resource.id,
+      });
       const userOpHash = await submitUsdcPayment({
         bundlerClient,
         transfers: [
@@ -337,15 +356,35 @@ export function PaymentIntentBox({
     setStep("verifying");
     setUnlockingProgress(flow);
 
-    const result = await postUnlock(
-      {
-        accessId: intent.accessId,
-        txHash,
-      },
-      {
-        wallet: walletAddress,
-      },
-    );
+    let result;
+    try {
+      result = await withTimeout(
+        postUnlock(
+          {
+            accessId: intent.accessId,
+            txHash,
+          },
+          {
+            wallet: walletAddress,
+          },
+        ),
+        UNLOCK_POST_TIMEOUT_MS,
+        "unlock postUnlock",
+      );
+    } catch (error) {
+      setProgress(null);
+      setStep("error");
+      setPendingPaymentUserOpHash(null);
+      setPendingUnlockFlow(null);
+      setErrorMsg(
+        error instanceof Error && /timed out/i.test(error.message)
+          ? "Unlock verification timed out before the purchase record returned."
+          : error instanceof Error
+            ? error.message
+            : "Unlock verification failed.",
+      );
+      return;
+    }
 
     if (result.ok) {
       setPendingPaymentUserOpHash(null);
@@ -385,7 +424,11 @@ export function PaymentIntentBox({
 
   async function waitForArcBalance(requiredAmount: bigint) {
     for (let attempt = 0; attempt < 24; attempt += 1) {
-      const balance = await readArcUsdcBalance(walletAddress);
+      const balance = await withTimeout(
+        readArcUsdcBalance(walletAddress),
+        UNLOCK_READ_TIMEOUT_MS,
+        "unlock readArcUsdcBalance",
+      );
       if (balance >= requiredAmount) {
         return;
       }
@@ -394,6 +437,29 @@ export function PaymentIntentBox({
     }
 
     throw new Error("Bridge completed but Arc USDC balance was not observed.");
+  }
+
+  async function withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    label: string,
+  ) {
+    let timeoutId: number | undefined;
+
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+          timeoutId = window.setTimeout(() => {
+            reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+    }
   }
 
   function setDirectProgress(step: DirectUnlockStep) {

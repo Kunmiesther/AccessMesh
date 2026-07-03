@@ -43,6 +43,11 @@ export async function handleProtectedResourceGET(
       );
     }
 
+    console.info("UNLOCK STEP 9 Resource unlocked", {
+      resourceId: id,
+      wallet: access.wallet,
+    });
+
     await recordActivity({
       type: ActivityType.ProtectedResourceAccessed,
       wallet: access.wallet,

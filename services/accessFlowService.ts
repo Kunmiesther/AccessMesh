@@ -20,6 +20,7 @@ import type { PaymentIntent, UnlockResponse, UnlockVerification } from "@/types"
 const INTENT_TTL_MS =
   Number(process.env.ACCESS_INTENT_TTL_SECONDS ?? 600) * 1000;
 const TOKEN_TTL_SECONDS = Number(process.env.ACCESS_TOKEN_TTL_SECONDS ?? 3600);
+const UNLOCK_VERIFY_TIMEOUT_MS = 90_000;
 
 type AccessIntent = {
   accessId: string;
@@ -135,16 +136,20 @@ export async function unlockAccess(params: {
     status: LedgerStatus.PaymentSubmitted,
   });
 
-  const verification = await verifySettlement({
-    txHash,
-    payerWallet: intent.payerWallet,
-    transfers: buildPaymentTransfers({
-      creatorWallet: intent.creatorWallet,
-      treasuryWallet: intent.treasuryWallet,
-      creatorAmountUSDC: intent.creatorAmountUSDC,
-      treasuryAmountUSDC: intent.treasuryAmountUSDC,
+  const verification = await withTimeout(
+    verifySettlement({
+      txHash,
+      payerWallet: intent.payerWallet,
+      transfers: buildPaymentTransfers({
+        creatorWallet: intent.creatorWallet,
+        treasuryWallet: intent.treasuryWallet,
+        creatorAmountUSDC: intent.creatorAmountUSDC,
+        treasuryAmountUSDC: intent.treasuryAmountUSDC,
+      }),
     }),
-  }).catch(async (error: unknown) => {
+    UNLOCK_VERIFY_TIMEOUT_MS,
+    "unlock verifySettlement",
+  ).catch(async (error: unknown) => {
     await prisma.payment.update({
       where: { txHash },
       data: { status: "CONFIRMING" },
@@ -199,10 +204,23 @@ export async function unlockAccess(params: {
     };
   }
 
+  console.info("UNLOCK STEP 7 Payment verified", {
+    resourceId: intent.resourceId,
+    wallet: intent.payerWallet,
+    txHash,
+  });
+
   const settlement = await settlePayment({
     txHash,
     resourceId: intent.resourceId,
     payerWallet: intent.payerWallet,
+  });
+
+  console.info("UNLOCK STEP 8 Purchase recorded", {
+    resourceId: intent.resourceId,
+    wallet: intent.payerWallet,
+    txHash,
+    purchaseId: settlement.purchase.id,
   });
 
   const token = signAccessToken({
@@ -620,4 +638,27 @@ function buildPaymentTransfers(params: {
   }
 
   return transfers;
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 }

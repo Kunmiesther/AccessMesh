@@ -158,6 +158,17 @@ export async function getResourceDetail(id: string, wallet?: string | null) {
           },
           orderBy: { createdAt: "desc" },
         })),
+    ) ||
+    Boolean(
+      connectedWallet &&
+        (await prisma.purchase.findUnique({
+          where: {
+            resourceId_buyerWallet: {
+              resourceId: id,
+              buyerWallet: connectedWallet,
+            },
+          },
+        })),
     );
 
   return toResourceDetail(resource, owned);
@@ -196,9 +207,24 @@ export async function validateAccess(resourceId: string, wallet: string) {
     orderBy: { createdAt: "desc" },
   });
 
+  const purchase = payment
+    ? null
+    : await prisma.purchase.findUnique({
+        where: {
+          resourceId_buyerWallet: {
+            resourceId,
+            buyerWallet: payerWallet,
+          },
+        },
+      });
+
   return {
-    allowed: Boolean(payment),
-    reason: payment ? "SETTLED_PAYMENT_FOUND" : "PAYMENT_REQUIRED",
+    allowed: Boolean(payment || purchase),
+    reason: payment
+      ? "SETTLED_PAYMENT_FOUND"
+      : purchase
+        ? "PURCHASE_FOUND"
+        : "PAYMENT_REQUIRED",
     resource: serializeResource(resource),
     payment,
   };

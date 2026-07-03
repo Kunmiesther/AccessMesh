@@ -65,6 +65,9 @@ export async function verifySettlement(params: {
     .catch(() => null);
 
   if (!receipt) {
+    console.info("[unlock] receipt = null", {
+      txHash: params.txHash,
+    });
     return {
       status: "PENDING",
       settled: false,
@@ -74,11 +77,31 @@ export async function verifySettlement(params: {
     };
   }
 
+  console.info("[unlock] receipt fields", {
+    txHash: params.txHash,
+    blockNumber: receipt.blockNumber?.toString() ?? null,
+    gasUsed: receipt.gasUsed?.toString() ?? null,
+    status: receipt.status,
+  });
+
   if (receipt.status !== "success") {
     return failed(params.txHash, "transaction reverted on Arc Testnet", {
       chainId,
       blockNumber: receipt.blockNumber?.toString(),
     });
+  }
+
+  if (receipt.blockNumber == null) {
+    console.info("[unlock] blockNumber = null", {
+      txHash: params.txHash,
+    });
+    return {
+      status: "PENDING",
+      settled: false,
+      reason: "transaction receipt does not yet have a block number",
+      txHash: params.txHash,
+      chainId,
+    };
   }
 
   const latestBlock = await arcPublicClient.getBlockNumber();
