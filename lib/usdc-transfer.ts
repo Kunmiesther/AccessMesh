@@ -31,6 +31,7 @@ export type UsdcBundlerClient = Pick<
   NonNullable<ModularWalletSession["bundlerClient"]>,
   | "account"
   | "getChainId"
+  | "prepareUserOperation"
   | "sendUserOperation"
   | "waitForUserOperationReceipt"
   | "getUserOperationReceipt"
@@ -60,6 +61,13 @@ export async function submitUsdcPayment(params: {
     throw new Error("Publish smart account is unavailable.");
   }
 
+  const chainId = await params.bundlerClient.getChainId();
+  if (chainId !== ArcTestnet.chainId) {
+    throw new Error(
+      `Direct Arc unlock must run on Arc. Active chain id: ${chainId}.`,
+    );
+  }
+
   const gasFees = await withTimeout(
     getArcUserOperationGasFees(),
     UNLOCK_OPERATION_TIMEOUT_MS,
@@ -85,7 +93,6 @@ export async function submitUsdcPayment(params: {
   const request = {
     account,
     calls,
-    // Force a direct Arc USDC UserOperation path for unlocks.
     parameters: [
       "factory",
       "fees",
@@ -97,6 +104,56 @@ export async function submitUsdcPayment(params: {
     maxPriorityFeePerGas: gasFees.maxPriorityFeePerGas,
     maxFeePerGas: gasFees.maxFeePerGas,
   };
+
+  const preparedRequest = await withTimeout(
+    params.bundlerClient.prepareUserOperation(request),
+    UNLOCK_OPERATION_TIMEOUT_MS,
+    "unlock prepareUserOperation",
+  );
+
+  console.info("[unlock] ACTIVE SEND PAYLOAD", {
+    accountAddress: account.address,
+    chainId,
+    callsCount: calls.length,
+    firstCallTarget: calls[0]?.to ?? null,
+    firstCallCalldataLength:
+      Math.max(((calls[0]?.data ?? "0x").length - 2) / 2, 0),
+    maxFeePerGasPresent: isPresent(preparedRequest.maxFeePerGas),
+    maxPriorityFeePerGasPresent: isPresent(
+      preparedRequest.maxPriorityFeePerGas,
+    ),
+    paymasterPresent: isPresent(
+      (preparedRequest as { paymaster?: unknown }).paymaster,
+    ),
+    paymasterDataPresent: isPresent(
+      (preparedRequest as { paymasterData?: unknown }).paymasterData,
+    ),
+    paymasterVerificationGasLimitPresent: isPresent(
+      (preparedRequest as { paymasterVerificationGasLimit?: unknown })
+        .paymasterVerificationGasLimit,
+    ),
+    paymasterPostOpGasLimitPresent: isPresent(
+      (preparedRequest as { paymasterPostOpGasLimit?: unknown })
+        .paymasterPostOpGasLimit,
+    ),
+  });
+
+  if (
+    isPresent((preparedRequest as { paymaster?: unknown }).paymaster) ||
+    isPresent((preparedRequest as { paymasterData?: unknown }).paymasterData) ||
+    isPresent(
+      (preparedRequest as { paymasterVerificationGasLimit?: unknown })
+        .paymasterVerificationGasLimit,
+    ) ||
+    isPresent(
+      (preparedRequest as { paymasterPostOpGasLimit?: unknown })
+        .paymasterPostOpGasLimit,
+    )
+  ) {
+    throw new Error(
+      "Direct Arc unlock must not use paymaster sponsorship.",
+    );
+  }
 
   const userOpHash = await withTimeout(
     params.bundlerClient.sendUserOperation(request),
@@ -319,6 +376,10 @@ async function withTimeout<T>(
       clearTimeout(timeoutId);
     }
   }
+}
+
+function isPresent(value: unknown) {
+  return typeof value !== "undefined" && value !== null;
 }
 
 async function requestRawUserOperationReceipt(
