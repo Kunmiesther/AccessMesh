@@ -9,7 +9,7 @@ export async function GET() {
 
   return NextResponse.json({
     ok: true,
-    activity: activity.map((entry) => ({
+    activity: activity.map((entry: any) => ({
       id: entry.id,
       type: entry.type,
       wallet: entry.wallet,
