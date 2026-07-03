@@ -322,13 +322,6 @@ export function PaymentIntentBox({
         userOpHash,
       });
 
-      if (confirmation.status === "pending") {
-        setProgress(null);
-        setStep("confirming");
-        setConfirmingMsg("Transaction is taking longer than expected.");
-        return;
-      }
-
       await settleUnlockAfterPayment(flow, confirmation.transactionHash);
     } catch (err: unknown) {
       setProgress(null);
@@ -354,13 +347,6 @@ export function PaymentIntentBox({
         bundlerClient,
         userOpHash: pendingPaymentUserOpHash,
       });
-
-      if (confirmation.status === "pending") {
-        setProgress(null);
-        setStep("confirming");
-        setConfirmingMsg("Transaction is taking longer than expected.");
-        return;
-      }
 
       await settleUnlockAfterPayment(
         pendingUnlockFlow,
@@ -798,6 +784,10 @@ function getUnlockErrorMessage(err: unknown) {
 
   if (/max operations/i.test(message)) {
     return "Your account has too many pending unlock operations. Wait for them to clear, then retry.";
+  }
+
+  if (/confirmation was not found after timeout/i.test(message)) {
+    return "Unlock confirmation was not found after timeout. Wait for pending operations to clear, then retry.";
   }
 
   return message;
