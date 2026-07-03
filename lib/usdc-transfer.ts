@@ -2,11 +2,6 @@
 
 import { ArcTestnet } from "@circle-fin/app-kit/chains";
 import {
-  toModularTransport,
-} from "@circle-fin/modular-wallets-core";
-import { createBundlerClient } from "viem/account-abstraction";
-import {
-  createPublicClient,
   encodeFunctionData,
   erc20Abi,
   parseUnits,
@@ -14,14 +9,11 @@ import {
   type Hash,
 } from "viem";
 import { WaitForUserOperationReceiptTimeoutError } from "viem/account-abstraction";
-import { getArcUserOperationGasFees } from "@/lib/arc-gas";
 import type { ModularWalletSession } from "@/lib/modular-wallet";
-import { arcTestnet } from "viem/chains";
 
 export const USDC_PAYMENT_CONFIRMATION_TIMEOUT_MS = 120_000;
 const UNLOCK_OPERATION_TIMEOUT_MS = 120_000;
 const UNLOCK_LOOKUP_TIMEOUT_MS = 15_000;
-const MODULAR_WALLET_CHAIN_PATH = "arcTestnet";
 
 export type UsdcPaymentConfirmation =
   {
@@ -50,7 +42,6 @@ export async function submitUsdcPayment(params: {
     recipientWallet: Address;
     amountUSDC: number;
   }>;
-  logPrefix?: string;
 }): Promise<Hash> {
   const calls = params.transfers
     .filter((transfer) => transfer.amountUSDC > 0)
@@ -67,10 +58,6 @@ export async function submitUsdcPayment(params: {
     throw new Error("Publish smart account is unavailable.");
   }
 
-  const directBundlerClient = createDirectUnlockBundlerClient(
-    account,
-  );
-
   const chainId = await params.bundlerClient.getChainId();
   if (chainId !== ArcTestnet.chainId) {
     throw new Error(
@@ -78,73 +65,30 @@ export async function submitUsdcPayment(params: {
     );
   }
 
-  const gasFees = await withTimeout(
-    getArcUserOperationGasFees(),
-    UNLOCK_OPERATION_TIMEOUT_MS,
-    "unlock gas estimation",
-  );
-
-  if (params.logPrefix === "publish") {
-    const chainId = await params.bundlerClient.getChainId();
-    console.info("[publish] ACTIVE SEND PAYLOAD", {
-      accountPresent: Boolean(account),
-      accountAddress: account.address,
-      chainId,
-      callsLength: calls.length,
-      callTarget: calls[0]?.to,
-      calldataLength: calls[0]?.data?.length ?? 0,
-      maxFeePerGasPresent: Boolean(gasFees.maxFeePerGas),
-      maxPriorityFeePerGasPresent: Boolean(gasFees.maxPriorityFeePerGas),
-    });
-  }
-
   const request = {
     account,
     calls,
-    parameters: [
-      "factory",
-      "fees",
-      "gas",
-      "nonce",
-      "signature",
-      "authorization",
-    ] as const,
-    maxPriorityFeePerGas: gasFees.maxPriorityFeePerGas,
-    maxFeePerGas: gasFees.maxFeePerGas,
   };
 
   console.info("UNLOCK STEP 4 Building unlock user operation");
-  const preparedRequest = await withTimeout(
-    directBundlerClient.prepareUserOperation(request),
-    UNLOCK_OPERATION_TIMEOUT_MS,
-    "unlock prepareUserOperation",
-  );
-
-  const sendRequest = stripUnlockPaymasterFields(preparedRequest);
 
   console.info("[unlock] ACTIVE SEND PAYLOAD", {
     accountAddress: account.address,
     chainId,
     ...summarizeUnlockUserOperationRequest({
       chainId,
-      request: sendRequest,
+      request,
       calls,
       accountAddress: account.address,
     }),
   });
-
-  if (hasUnlockPaymasterFields(sendRequest)) {
-    throw new Error(
-      "Direct Arc unlock must not use paymaster sponsorship.",
-    );
-  }
 
   console.info("UNLOCK STEP 5 Sending unlock user operation");
 
   let userOpHash: Hash;
   try {
     userOpHash = await withTimeout(
-      directBundlerClient.sendUserOperation(sendRequest as never),
+      params.bundlerClient.sendUserOperation(request),
       UNLOCK_OPERATION_TIMEOUT_MS,
       "unlock sendUserOperation",
     );
@@ -153,7 +97,7 @@ export async function submitUsdcPayment(params: {
       "[unlock] sendUserOperation request",
       summarizeUnlockUserOperationRequest({
         chainId,
-        request: sendRequest,
+        request,
         calls,
         accountAddress: account.address,
       }),
@@ -399,63 +343,6 @@ function isPresent(value: unknown) {
   return typeof value !== "undefined" && value !== null;
 }
 
-function createDirectUnlockBundlerClient(
-  account: NonNullable<UsdcBundlerClient["account"]>,
-) {
-  const { clientKey, clientUrl } = getClientEnv();
-  const modularTransport = toModularTransport(
-    getChainClientUrl(clientUrl),
-    clientKey,
-  );
-  const publicClient = createPublicClient({
-    chain: arcTestnet,
-    transport: modularTransport,
-  });
-
-  return createBundlerClient({
-    account,
-    chain: arcTestnet,
-    client: publicClient,
-    transport: modularTransport,
-  });
-}
-
-function getClientEnv() {
-  const clientKey = process.env.NEXT_PUBLIC_CLIENT_KEY;
-  const clientUrl = process.env.NEXT_PUBLIC_CLIENT_URL;
-
-  if (!clientKey || !clientUrl) {
-    throw new Error("Missing NEXT_PUBLIC_CLIENT_KEY or NEXT_PUBLIC_CLIENT_URL.");
-  }
-
-  return { clientKey, clientUrl };
-}
-
-function getChainClientUrl(clientUrl: string) {
-  return `${clientUrl.replace(/\/+$/, "")}/${MODULAR_WALLET_CHAIN_PATH}`;
-}
-
-function stripUnlockPaymasterFields<T extends Record<string, unknown>>(request: T) {
-  const {
-    paymaster: _paymaster,
-    paymasterData: _paymasterData,
-    paymasterVerificationGasLimit: _paymasterVerificationGasLimit,
-    paymasterPostOpGasLimit: _paymasterPostOpGasLimit,
-    ...sanitizedRequest
-  } = request;
-
-  return sanitizedRequest;
-}
-
-function hasUnlockPaymasterFields(request: Record<string, unknown>) {
-  return (
-    isPresent(request.paymaster) ||
-    isPresent(request.paymasterData) ||
-    isPresent(request.paymasterVerificationGasLimit) ||
-    isPresent(request.paymasterPostOpGasLimit)
-  );
-}
-
 function isMaxPendingOperationsError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return /max operations/i.test(message) || /pending unlock operations/i.test(message);
@@ -492,26 +379,11 @@ function summarizeUnlockUserOperationRequest(params: {
       calldataLength: Math.max((call.data.length - 2) / 2, 0),
       value: call.value.toString(),
     })),
-    maxFeePerGas:
-      typeof params.request.maxFeePerGas === "bigint"
-        ? params.request.maxFeePerGas.toString()
-        : params.request.maxFeePerGas ?? null,
-    maxPriorityFeePerGas:
-      typeof params.request.maxPriorityFeePerGas === "bigint"
-        ? params.request.maxPriorityFeePerGas.toString()
-        : params.request.maxPriorityFeePerGas ?? null,
-    callGasLimit:
-      typeof params.request.callGasLimit === "bigint"
-        ? params.request.callGasLimit.toString()
-        : params.request.callGasLimit ?? null,
-    preVerificationGas:
-      typeof params.request.preVerificationGas === "bigint"
-        ? params.request.preVerificationGas.toString()
-        : params.request.preVerificationGas ?? null,
-    verificationGasLimit:
-      typeof params.request.verificationGasLimit === "bigint"
-        ? params.request.verificationGasLimit.toString()
-        : params.request.verificationGasLimit ?? null,
+    maxFeePerGasPresent: isPresent(params.request.maxFeePerGas),
+    maxPriorityFeePerGasPresent: isPresent(params.request.maxPriorityFeePerGas),
+    callGasLimitPresent: isPresent(params.request.callGasLimit),
+    preVerificationGasPresent: isPresent(params.request.preVerificationGas),
+    verificationGasLimitPresent: isPresent(params.request.verificationGasLimit),
   };
 }
 
