@@ -13,7 +13,11 @@ import {
   type CctpQuote,
   type SourceBridgeState,
 } from "@/lib/cctp-client";
-import { cctpDestinationChain } from "@/lib/cctp-config";
+import {
+  cctpDestinationChain,
+  supportedCctpSources,
+  type SupportedCctpSourceKey,
+} from "@/lib/cctp-config";
 import type { ModularWalletSession } from "@/lib/modular-wallet";
 import {
   confirmUsdcPayment,
@@ -60,6 +64,7 @@ type ProgressState =
 type ProgressFlow = ProgressState["flow"];
 
 type BridgePrompt = {
+  sourceKey: SupportedCctpSourceKey;
   sourceBalance: SourceBridgeState;
   quote: CctpQuote;
   amountUSDC: number;
@@ -76,6 +81,11 @@ export function PaymentIntentBox({
   const [progress, setProgress] = useState<ProgressState | null>(null);
   const [bridgePrompt, setBridgePrompt] = useState<BridgePrompt | null>(null);
   const [bridgeBusy, setBridgeBusy] = useState(false);
+  const [bridgeSelectionBusy, setBridgeSelectionBusy] = useState(false);
+  const [bridgeSelectionError, setBridgeSelectionError] = useState("");
+  const [bridgeSourceKey, setBridgeSourceKey] = useState<SupportedCctpSourceKey>(
+    supportedCctpSources[0]?.key as SupportedCctpSourceKey,
+  );
   const [txHash, setTxHash] = useState<Hash | null>(null);
   const [bridgeTxHash, setBridgeTxHash] = useState<Hash | null>(null);
   const [pendingPaymentUserOpHash, setPendingPaymentUserOpHash] = useState<Hash | null>(null);
@@ -150,8 +160,8 @@ export function PaymentIntentBox({
         return;
       }
 
-      const sourceBalance = await getSourceBridgeState(requiredAmount);
-      if (!sourceBalance) {
+      const bridgePrompt = await findAvailableBridgePrompt();
+      if (!bridgePrompt) {
         setProgress(null);
         setStep("error");
         setErrorMsg(
@@ -160,25 +170,9 @@ export function PaymentIntentBox({
         return;
       }
 
-      const quote = await getCctpQuote({
-        sourceKey: sourceBalance.sourceKey,
-        amount: requiredAmount,
-      });
-
-      if (sourceBalance.balance < BigInt(quote.totalBurnAmount)) {
-        setProgress(null);
-        setStep("error");
-        setErrorMsg(
-          `You have ${sourceBalance.balanceUSDC.toFixed(2)} USDC on ${sourceBalance.chainName}. CCTP requires ${quote.totalBurnUSDC.toFixed(2)} USDC including forwarding fees.`,
-        );
-        return;
-      }
-
-      setBridgePrompt({
-        sourceBalance,
-        quote,
-        amountUSDC: requiredAmountUSDC,
-      });
+      setBridgeSourceKey(bridgePrompt.sourceKey);
+      setBridgeSelectionError("");
+      setBridgePrompt(bridgePrompt);
       setProgress(null);
     } catch (err: unknown) {
       setProgress(null);
@@ -195,6 +189,7 @@ export function PaymentIntentBox({
     setBridgeBusy(true);
     setStep("idle");
     setErrorMsg("");
+    setBridgeSelectionError("");
     setBridgeTxHash(null);
     setBridgeProgress("Checking balances...");
 
@@ -263,6 +258,7 @@ export function PaymentIntentBox({
       );
 
       setBridgePrompt(null);
+      setBridgeSelectionError("");
       setBridgeProgress("USDC received on Arc...");
       await waitForArcBalance(requiredAmount);
       await executeExistingUnlock("bridge");
@@ -465,6 +461,82 @@ export function PaymentIntentBox({
     throw new Error("Bridge completed but Arc USDC balance was not observed.");
   }
 
+  async function buildBridgePrompt(sourceKey: SupportedCctpSourceKey) {
+    const requiredAmount = getRequiredUnlockAmount(intent);
+    const requiredAmountUSDC = usdcSubunitsToAmount(requiredAmount);
+    const sourceBalance = await getSourceBridgeState(requiredAmount, sourceKey);
+
+    if (!sourceBalance) {
+      return null;
+    }
+
+    const quote = await getCctpQuote({
+      sourceKey: sourceBalance.sourceKey,
+      amount: requiredAmount,
+    });
+
+    if (sourceBalance.balance < BigInt(quote.totalBurnAmount)) {
+      return null;
+    }
+
+    return {
+      sourceKey: sourceBalance.sourceKey,
+      sourceBalance,
+      quote,
+      amountUSDC: requiredAmountUSDC,
+    } satisfies BridgePrompt;
+  }
+
+  async function findAvailableBridgePrompt() {
+    for (const source of supportedCctpSources) {
+      try {
+        const prompt = await buildBridgePrompt(source.key as SupportedCctpSourceKey);
+        if (prompt) {
+          return prompt;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    return null;
+  }
+
+  async function handleSelectBridgeSource(sourceKey: SupportedCctpSourceKey) {
+    if (bridgeBusy) {
+      return;
+    }
+
+    setBridgeSelectionBusy(true);
+    setBridgeSelectionError("");
+    setBridgeSourceKey(sourceKey);
+
+    try {
+      const prompt = await buildBridgePrompt(sourceKey);
+      if (!prompt) {
+        setBridgeSelectionError(
+          `No funded CCTP source wallet was found on ${getBridgeSourceLabel(sourceKey)}.`,
+        );
+        return;
+      }
+
+      setBridgePrompt(prompt);
+    } catch (err: unknown) {
+      setBridgeSelectionError(
+        err instanceof Error ? err.message : "Unable to load CCTP source balance.",
+      );
+    } finally {
+      setBridgeSelectionBusy(false);
+    }
+  }
+
+  function getBridgeSourceLabel(sourceKey: SupportedCctpSourceKey) {
+    return (
+      supportedCctpSources.find((source) => source.key === sourceKey)?.name ??
+      sourceKey
+    );
+  }
+
   async function withTimeout<T>(
     promise: Promise<T>,
     timeoutMs: number,
@@ -581,6 +653,27 @@ export function PaymentIntentBox({
             {bridgePrompt.quote.destinationChain.name} using Circle CCTP?
           </p>
           <div style={bridgeDetailsStyle}>
+            <div style={{ display: "grid", gap: 8, marginBottom: 8 }}>
+              <label style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                SOURCE CHAIN
+              </label>
+              <select
+                value={bridgeSourceKey}
+                onChange={(event) => {
+                  void handleSelectBridgeSource(
+                    event.target.value as SupportedCctpSourceKey,
+                  );
+                }}
+                disabled={bridgeSelectionBusy || bridgeBusy}
+                style={bridgeSourceSelectStyle}
+              >
+                {supportedCctpSources.map((source) => (
+                  <option key={source.key} value={source.key}>
+                    {source.name}
+                  </option>
+                ))}
+              </select>
+            </div>
             <ReceiptLine label="SOURCE" value={bridgePrompt.quote.sourceChain.name} />
             <ReceiptLine label="DESTINATION" value={bridgePrompt.quote.destinationChain.name} />
             <ReceiptLine label="AMOUNT" value={`${bridgePrompt.amountUSDC.toFixed(2)} USDC`} accent />
@@ -593,24 +686,39 @@ export function PaymentIntentBox({
               value={`${Number(formatUnits(bridgePrompt.sourceBalance.balance, 6)).toFixed(2)} USDC`}
             />
           </div>
+          {bridgeSelectionError && <p style={errorStyle}>{bridgeSelectionError}</p>}
           <div style={bridgeActionRowStyle}>
             <button
               type="button"
               onClick={handleConfirmBridge}
-              disabled={bridgeBusy}
+              disabled={bridgeBusy || bridgeSelectionBusy}
               style={{
                 ...primaryActionStyle,
-                background: bridgeBusy ? "var(--border)" : "var(--accent)",
-                color: bridgeBusy ? "var(--text-muted)" : "#000",
-                cursor: bridgeBusy ? "not-allowed" : "pointer",
+                background:
+                  bridgeBusy || bridgeSelectionBusy ? "var(--border)" : "var(--accent)",
+                color:
+                  bridgeBusy || bridgeSelectionBusy ? "var(--text-muted)" : "#000",
+                cursor:
+                  bridgeBusy || bridgeSelectionBusy ? "not-allowed" : "pointer",
               }}
             >
-              {bridgeBusy ? "Bridging..." : "Bridge and unlock"}
+              {bridgeBusy
+                ? "Bridging..."
+                : bridgeSelectionBusy
+                  ? "Loading source..."
+                  : "Bridge and unlock"}
             </button>
             <button
               type="button"
-              onClick={() => setBridgePrompt(null)}
-              disabled={bridgeBusy}
+              onClick={() => {
+                setBridgePrompt(null);
+                setBridgeSelectionError("");
+                setStep("error");
+                setErrorMsg(
+                  `You don't have enough Arc USDC. Add ${intent.amountUSDC.toFixed(2)} USDC on ${cctpDestinationChain.name} or connect a supported source wallet with USDC.`,
+                );
+              }}
+              disabled={bridgeBusy || bridgeSelectionBusy}
               style={secondaryActionStyle}
             >
               Cancel
@@ -915,6 +1023,18 @@ const bridgeDetailsStyle = {
   borderRadius: 8,
   padding: 12,
   marginBottom: 14,
+} as const;
+
+const bridgeSourceSelectStyle = {
+  width: "100%",
+  padding: "10px 12px",
+  background: "var(--surface-elevated)",
+  color: "var(--text-primary)",
+  border: "1px solid var(--border)",
+  borderRadius: 4,
+  fontSize: 13,
+  fontFamily: "var(--font-mono)",
+  outline: "none",
 } as const;
 
 const bridgeActionRowStyle = {
