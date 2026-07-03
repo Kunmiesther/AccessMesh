@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { formatUnits, type Address, type Hash } from "viem";
 import { postCctpBridgeEvent, postUnlock } from "@/lib/api";
 import {
@@ -83,12 +83,23 @@ export function PaymentIntentBox({
   const [checkingPaymentStatus, setCheckingPaymentStatus] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [confirmingMsg, setConfirmingMsg] = useState("");
+  const unlockInFlightRef = useRef(false);
 
   async function handleUnlock() {
+    if (unlockInFlightRef.current) {
+      return;
+    }
+
+    unlockInFlightRef.current = true;
     setBridgePrompt(null);
     setPendingPaymentUserOpHash(null);
     setPendingUnlockFlow(null);
-    await checkBalancesThenUnlock();
+
+    try {
+      await checkBalancesThenUnlock();
+    } finally {
+      unlockInFlightRef.current = false;
+    }
   }
 
   async function checkBalancesThenUnlock() {
@@ -488,7 +499,8 @@ export function PaymentIntentBox({
     setBridgeProgress("Complete.");
   }
 
-  const isLoading = step === "paying" || step === "verifying" || bridgeBusy;
+  const isLoading =
+    step === "paying" || step === "verifying" || bridgeBusy || unlockInFlightRef.current;
 
   return (
     <div

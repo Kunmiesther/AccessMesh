@@ -140,15 +140,7 @@ export async function submitUsdcPayment(params: {
 
   if (
     isPresent((preparedRequest as { paymaster?: unknown }).paymaster) ||
-    isPresent((preparedRequest as { paymasterData?: unknown }).paymasterData) ||
-    isPresent(
-      (preparedRequest as { paymasterVerificationGasLimit?: unknown })
-        .paymasterVerificationGasLimit,
-    ) ||
-    isPresent(
-      (preparedRequest as { paymasterPostOpGasLimit?: unknown })
-        .paymasterPostOpGasLimit,
-    )
+    isPresent((preparedRequest as { paymasterData?: unknown }).paymasterData)
   ) {
     throw new Error(
       "Direct Arc unlock must not use paymaster sponsorship.",
