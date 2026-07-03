@@ -308,12 +308,11 @@ export function PaymentIntentBox({
       await settleUnlockAfterPayment(flow, confirmation.transactionHash);
     } catch (err: unknown) {
       setProgress(null);
-      setStep("confirming");
+      setStep("error");
       setPendingPaymentUserOpHash(null);
       setPendingUnlockFlow(null);
-      setConfirmingMsg(
-        err instanceof Error ? err.message : "Payment or verification failed.",
-      );
+      setConfirmingMsg("");
+      setErrorMsg(err instanceof Error ? err.message : "Unlock payment failed.");
     }
   }
 
@@ -342,10 +341,11 @@ export function PaymentIntentBox({
       );
     } catch (err: unknown) {
       setProgress(null);
-      setStep("confirming");
-      setConfirmingMsg(
-        err instanceof Error ? err.message : "Payment or verification failed.",
-      );
+      setStep("error");
+      setPendingPaymentUserOpHash(null);
+      setPendingUnlockFlow(null);
+      setConfirmingMsg("");
+      setErrorMsg(err instanceof Error ? err.message : "Unlock payment failed.");
     } finally {
       setCheckingPaymentStatus(false);
     }
@@ -596,7 +596,7 @@ export function PaymentIntentBox({
         <div style={confirmingBoxStyle}>
           <p style={confirmingTitleStyle}>{confirmingMsg}</p>
           <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, lineHeight: 1.5 }}>
-            Your payment was submitted. Access will be granted once the transaction is confirmed.
+            Waiting for on-chain confirmation. Access will be granted once the transaction is confirmed.
           </p>
           {pendingPaymentUserOpHash && (
             <div style={{ marginTop: 12 }}>

@@ -82,13 +82,24 @@ export async function submitUsdcPayment(params: {
 
   console.info("UNLOCK STEP 4 Sending unlock UserOperation");
 
+  const request = {
+    account,
+    calls,
+    // Force a direct Arc USDC UserOperation path for unlocks.
+    parameters: [
+      "factory",
+      "fees",
+      "gas",
+      "nonce",
+      "signature",
+      "authorization",
+    ] as const,
+    maxPriorityFeePerGas: gasFees.maxPriorityFeePerGas,
+    maxFeePerGas: gasFees.maxFeePerGas,
+  };
+
   const userOpHash = await withTimeout(
-    params.bundlerClient.sendUserOperation({
-      account,
-      calls,
-      maxPriorityFeePerGas: gasFees.maxPriorityFeePerGas,
-      maxFeePerGas: gasFees.maxFeePerGas,
-    }),
+    params.bundlerClient.sendUserOperation(request),
     UNLOCK_OPERATION_TIMEOUT_MS,
     "unlock sendUserOperation",
   );
