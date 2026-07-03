@@ -84,9 +84,17 @@ export function PaymentIntentBox({
   const [errorMsg, setErrorMsg] = useState("");
   const [confirmingMsg, setConfirmingMsg] = useState("");
   const unlockInFlightRef = useRef(false);
+  const unlockPendingOpsBlockedRef = useRef(false);
 
   async function handleUnlock() {
     if (unlockInFlightRef.current) {
+      return;
+    }
+
+    if (unlockPendingOpsBlockedRef.current) {
+      setErrorMsg(
+        "Your account has too many pending unlock operations. Wait for them to clear, then retry.",
+      );
       return;
     }
 
@@ -118,6 +126,10 @@ export function PaymentIntentBox({
     try {
       const requiredAmount = getRequiredUnlockAmount(intent);
       const requiredAmountUSDC = usdcSubunitsToAmount(requiredAmount);
+      console.info("UNLOCK STEP 1 Unlock clicked", {
+        wallet: walletAddress,
+        resourceId: intent.resource.id,
+      });
       const arcBalance = await withTimeout(
         readArcUsdcBalance(walletAddress),
         UNLOCK_READ_TIMEOUT_MS,
@@ -285,9 +297,10 @@ export function PaymentIntentBox({
     setUnlockingProgress(flow);
 
     try {
-      console.info("UNLOCK STEP 3 Building unlock UserOperation", {
+      console.info("UNLOCK STEP 3 Preparing unlock payment", {
         wallet: walletAddress,
         resourceId: intent.resource.id,
+        amountUSDC: intent.amountUSDC,
       });
       const userOpHash = await submitUsdcPayment({
         bundlerClient,
@@ -323,7 +336,10 @@ export function PaymentIntentBox({
       setPendingPaymentUserOpHash(null);
       setPendingUnlockFlow(null);
       setConfirmingMsg("");
-      setErrorMsg(err instanceof Error ? err.message : "Unlock payment failed.");
+      const message = getUnlockErrorMessage(err);
+      unlockPendingOpsBlockedRef.current =
+        /too many pending unlock operations/i.test(message);
+      setErrorMsg(message);
     }
   }
 
@@ -356,7 +372,10 @@ export function PaymentIntentBox({
       setPendingPaymentUserOpHash(null);
       setPendingUnlockFlow(null);
       setConfirmingMsg("");
-      setErrorMsg(err instanceof Error ? err.message : "Unlock payment failed.");
+      const message = getUnlockErrorMessage(err);
+      unlockPendingOpsBlockedRef.current =
+        /too many pending unlock operations/i.test(message);
+      setErrorMsg(message);
     } finally {
       setCheckingPaymentStatus(false);
     }
@@ -398,10 +417,20 @@ export function PaymentIntentBox({
     }
 
     if (result.ok) {
+      console.info("UNLOCK STEP 9 Granting resource access", {
+        resourceId: intent.resource.id,
+        wallet: walletAddress,
+        txHash,
+      });
       setPendingPaymentUserOpHash(null);
       setPendingUnlockFlow(null);
       setCompleteProgress(flow);
       onUnlocked(result.resource, result.txHash);
+      console.info("UNLOCK STEP 10 Resource unlocked", {
+        resourceId: intent.resource.id,
+        wallet: walletAddress,
+        txHash,
+      });
       return;
     }
 
@@ -759,6 +788,16 @@ function getBridgeErrorMessage(err: unknown) {
 
   if (/gas required exceeds allowance/i.test(message)) {
     return "The source wallet needs native gas to pay for the bridge transaction.";
+  }
+
+  return message;
+}
+
+function getUnlockErrorMessage(err: unknown) {
+  const message = err instanceof Error ? err.message : "Unlock payment failed.";
+
+  if (/max operations/i.test(message)) {
+    return "Your account has too many pending unlock operations. Wait for them to clear, then retry.";
   }
 
   return message;

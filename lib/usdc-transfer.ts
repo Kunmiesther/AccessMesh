@@ -88,11 +88,10 @@ export async function submitUsdcPayment(params: {
     });
   }
 
-  console.info("UNLOCK STEP 4 Sending unlock UserOperation");
-
   const request = {
     account,
     calls,
+    paymaster: {},
     parameters: [
       "factory",
       "fees",
@@ -105,6 +104,7 @@ export async function submitUsdcPayment(params: {
     maxFeePerGas: gasFees.maxFeePerGas,
   };
 
+  console.info("UNLOCK STEP 4 Building unlock user operation");
   const preparedRequest = await withTimeout(
     params.bundlerClient.prepareUserOperation(request),
     UNLOCK_OPERATION_TIMEOUT_MS,
@@ -147,13 +147,29 @@ export async function submitUsdcPayment(params: {
     );
   }
 
-  const userOpHash = await withTimeout(
-    params.bundlerClient.sendUserOperation(request),
-    UNLOCK_OPERATION_TIMEOUT_MS,
-    "unlock sendUserOperation",
-  );
+  console.info("UNLOCK STEP 5 Sending unlock user operation");
 
-  console.info("UNLOCK STEP 5 UserOperation hash received", userOpHash);
+  let userOpHash: Hash;
+  try {
+    userOpHash = await withTimeout(
+      params.bundlerClient.sendUserOperation(request),
+      UNLOCK_OPERATION_TIMEOUT_MS,
+      "unlock sendUserOperation",
+    );
+  } catch (error) {
+    console.error(
+      "[unlock] sendUserOperation request",
+      summarizeUnlockUserOperationRequest({
+        chainId,
+        preparedRequest,
+        calls,
+        accountAddress: account.address,
+      }),
+    );
+    throw error;
+  }
+
+  console.info("UNLOCK STEP 6 User operation hash received", userOpHash);
 
   return userOpHash;
 }
@@ -166,7 +182,7 @@ export async function confirmUsdcPayment(params: {
   const timeoutMs = params.timeoutMs ?? USDC_PAYMENT_CONFIRMATION_TIMEOUT_MS;
 
   try {
-    console.info("UNLOCK STEP 6 Waiting for confirmation");
+    console.info("UNLOCK STEP 7 Waiting for confirmation");
     const receipt = await withTimeout(
       params.bundlerClient.waitForUserOperationReceipt({
         hash: params.userOpHash,
@@ -179,6 +195,11 @@ export async function confirmUsdcPayment(params: {
     if (!receipt.success) {
       throw new Error(receipt.reason ?? "USDC payment user operation reverted.");
     }
+
+    console.info("UNLOCK STEP 8 Confirmed on-chain", {
+      userOpHash: params.userOpHash,
+      transactionHash: receipt.receipt.transactionHash,
+    });
 
     return {
       status: "confirmed",
@@ -195,7 +216,7 @@ export async function confirmUsdcPayment(params: {
       params.userOpHash,
     );
 
-    console.info("UNLOCK STEP 6 Receipt lookup after timeout", {
+    console.info("UNLOCK STEP 7 Receipt lookup after timeout", {
       userOpHash: params.userOpHash,
       getUserOperationReceipt: Boolean(confirmation),
       receiptBlockNumber: confirmation?.receipt?.blockNumber ?? null,
@@ -204,6 +225,10 @@ export async function confirmUsdcPayment(params: {
     });
 
     if (confirmation) {
+      console.info("UNLOCK STEP 8 Confirmed on-chain", {
+        userOpHash: params.userOpHash,
+        transactionHash: confirmation.receipt.transactionHash,
+      });
       return {
         status: "confirmed",
         userOpHash: params.userOpHash,
@@ -216,12 +241,16 @@ export async function confirmUsdcPayment(params: {
       params.userOpHash,
     );
 
-    console.info("UNLOCK STEP 6 Operation lookup after timeout", {
+    console.info("UNLOCK STEP 7 Operation lookup after timeout", {
       userOpHash: params.userOpHash,
       getUserOperation: Boolean(includedOperation),
     });
 
     if (includedOperation) {
+      console.info("UNLOCK STEP 8 Confirmed on-chain", {
+        userOpHash: params.userOpHash,
+        transactionHash: includedOperation.transactionHash,
+      });
       return {
         status: "confirmed",
         userOpHash: params.userOpHash,
@@ -372,6 +401,67 @@ async function withTimeout<T>(
 
 function isPresent(value: unknown) {
   return typeof value !== "undefined" && value !== null;
+}
+
+function summarizeUnlockUserOperationRequest(params: {
+  chainId: number;
+  preparedRequest: Record<string, unknown>;
+  calls: Array<{
+    to: Address;
+    data: `0x${string}`;
+    value: bigint;
+  }>;
+  accountAddress: Address;
+}) {
+  return {
+    account: {
+      address: params.accountAddress,
+    },
+    chain: {
+      id: params.chainId,
+      name: ArcTestnet.name,
+    },
+    sender: typeof params.preparedRequest.sender === "string" ? params.preparedRequest.sender : params.accountAddress,
+    nonce:
+      typeof params.preparedRequest.nonce === "bigint"
+        ? params.preparedRequest.nonce.toString()
+        : params.preparedRequest.nonce ?? null,
+    calls: params.calls.map((call) => ({
+      target: call.to,
+      calldataLength: Math.max((call.data.length - 2) / 2, 0),
+      value: call.value.toString(),
+    })),
+    maxFeePerGas:
+      typeof params.preparedRequest.maxFeePerGas === "bigint"
+        ? params.preparedRequest.maxFeePerGas.toString()
+        : params.preparedRequest.maxFeePerGas ?? null,
+    maxPriorityFeePerGas:
+      typeof params.preparedRequest.maxPriorityFeePerGas === "bigint"
+        ? params.preparedRequest.maxPriorityFeePerGas.toString()
+        : params.preparedRequest.maxPriorityFeePerGas ?? null,
+    callGasLimit:
+      typeof params.preparedRequest.callGasLimit === "bigint"
+        ? params.preparedRequest.callGasLimit.toString()
+        : params.preparedRequest.callGasLimit ?? null,
+    preVerificationGas:
+      typeof params.preparedRequest.preVerificationGas === "bigint"
+        ? params.preparedRequest.preVerificationGas.toString()
+        : params.preparedRequest.preVerificationGas ?? null,
+    verificationGasLimit:
+      typeof params.preparedRequest.verificationGasLimit === "bigint"
+        ? params.preparedRequest.verificationGasLimit.toString()
+        : params.preparedRequest.verificationGasLimit ?? null,
+    paymaster: params.preparedRequest.paymaster ?? null,
+    paymasterData: params.preparedRequest.paymasterData ?? null,
+    paymasterVerificationGasLimit:
+      typeof params.preparedRequest.paymasterVerificationGasLimit === "bigint"
+        ? params.preparedRequest.paymasterVerificationGasLimit.toString()
+        : params.preparedRequest.paymasterVerificationGasLimit ?? null,
+    paymasterPostOpGasLimit:
+      typeof params.preparedRequest.paymasterPostOpGasLimit === "bigint"
+        ? params.preparedRequest.paymasterPostOpGasLimit.toString()
+        : params.preparedRequest.paymasterPostOpGasLimit ?? null,
+  };
 }
 
 async function requestRawUserOperationReceipt(
