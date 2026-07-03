@@ -31,6 +31,8 @@ export type UsdcPaymentConfirmation =
 
 export type UsdcBundlerClient = Pick<
   NonNullable<ModularWalletSession["bundlerClient"]>,
+  | "account"
+  | "getChainId"
   | "sendUserOperation"
   | "waitForUserOperationReceipt"
   | "getUserOperationReceipt"
@@ -43,6 +45,7 @@ export async function submitUsdcPayment(params: {
     recipientWallet: Address;
     amountUSDC: number;
   }>;
+  logPrefix?: string;
 }): Promise<Hash> {
   const calls = params.transfers
     .filter((transfer) => transfer.amountUSDC > 0)
@@ -54,8 +57,28 @@ export async function submitUsdcPayment(params: {
     throw new Error("USDC payment requires at least one positive transfer.");
   }
 
+  const account = params.bundlerClient.account;
+  if (!account) {
+    throw new Error("Publish smart account is unavailable.");
+  }
+
   const gasFees = await getArcUserOperationGasFees();
+  if (params.logPrefix === "publish") {
+    const chainId = await params.bundlerClient.getChainId();
+    console.info("[publish] ACTIVE SEND PAYLOAD", {
+      accountPresent: Boolean(account),
+      accountAddress: account.address,
+      chainId,
+      callsLength: calls.length,
+      callTarget: calls[0]?.to,
+      calldataLength: calls[0]?.data?.length ?? 0,
+      maxFeePerGasPresent: Boolean(gasFees.maxFeePerGas),
+      maxPriorityFeePerGasPresent: Boolean(gasFees.maxPriorityFeePerGas),
+    });
+  }
+
   return params.bundlerClient.sendUserOperation({
+    account,
     calls,
     maxPriorityFeePerGas: gasFees.maxPriorityFeePerGas,
     maxFeePerGas: gasFees.maxFeePerGas,

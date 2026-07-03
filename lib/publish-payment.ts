@@ -3,14 +3,14 @@ import {
   encodeFunctionData,
   erc20Abi,
   isAddress,
-  parseUnits,
   type Address,
   type Hash,
+  parseUnits,
   type PublicClient,
 } from "viem";
 import { getArcUserOperationGasFees } from "@/lib/arc-gas";
 import type { ModularWalletSession } from "@/lib/modular-wallet";
-import { confirmUsdcPayment } from "@/lib/usdc-transfer";
+import { confirmUsdcPayment, submitUsdcPayment } from "@/lib/usdc-transfer";
 
 export function assertPublishEnvironment() {
   if (!process.env.NEXT_PUBLIC_CLIENT_KEY) {
@@ -124,44 +124,15 @@ export async function executePublishFeePayment(params: {
   });
 
   console.info("[publish] sending publish fee");
-  const account = params.bundlerClient.account;
-  if (!account) {
-    throw new Error("Publish smart account is unavailable.");
-  }
-
-  const publicClient = getPublishPublicClient(params.bundlerClient);
-  const gasFees = await getArcUserOperationGasFees(publicClient);
-
-  const transferCall = {
-    to: ArcTestnet.usdcAddress as Address,
-    data: encodeFunctionData({
-      abi: erc20Abi,
-      functionName: "transfer",
-      args: [params.treasuryWallet, parseUnits(params.publishFeeUSDC.toString(), 6)],
-    }),
-    value: BigInt(0),
-  } as const;
-
-  console.info("[publish] user operation payload", {
-    account: account.address,
-    chainId: activeChainId,
-    calls: [
+  const userOpHash = await submitUsdcPayment({
+    bundlerClient: params.bundlerClient,
+    logPrefix: "publish",
+    transfers: [
       {
-        to: transferCall.to,
-        value: transferCall.value.toString(),
-        dataLength: transferCall.data.length,
+        recipientWallet: params.treasuryWallet,
+        amountUSDC: params.publishFeeUSDC,
       },
     ],
-    maxPriorityFeePerGas: gasFees.maxPriorityFeePerGas.toString(),
-    maxFeePerGas: gasFees.maxFeePerGas.toString(),
-    paymaster: getPublishPaymasterMode(params.bundlerClient),
-  });
-
-  const userOpHash = await params.bundlerClient.sendUserOperation({
-    account,
-    calls: [transferCall],
-    maxPriorityFeePerGas: gasFees.maxPriorityFeePerGas,
-    maxFeePerGas: gasFees.maxFeePerGas,
   });
 
   const confirmation = await confirmUsdcPayment({
