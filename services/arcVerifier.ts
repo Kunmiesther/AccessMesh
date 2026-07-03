@@ -81,6 +81,7 @@ export async function verifySettlement(params: {
     txHash: params.txHash,
     blockNumber: receipt.blockNumber?.toString() ?? null,
     gasUsed: receipt.gasUsed?.toString() ?? null,
+    transactionHash: receipt.transactionHash ?? null,
     status: receipt.status,
   });
 

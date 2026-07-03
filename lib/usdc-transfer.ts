@@ -8,11 +8,7 @@ import {
   type Address,
   type Hash,
 } from "viem";
-import {
-  UserOperationNotFoundError,
-  UserOperationReceiptNotFoundError,
-  WaitForUserOperationReceiptTimeoutError,
-} from "viem/account-abstraction";
+import { WaitForUserOperationReceiptTimeoutError } from "viem/account-abstraction";
 import { getArcUserOperationGasFees } from "@/lib/arc-gas";
 import type { ModularWalletSession } from "@/lib/modular-wallet";
 
@@ -142,6 +138,9 @@ export async function confirmUsdcPayment(params: {
     console.info("UNLOCK STEP 6 Receipt lookup after timeout", {
       userOpHash: params.userOpHash,
       getUserOperationReceipt: Boolean(confirmation),
+      receiptBlockNumber: confirmation?.receipt?.blockNumber ?? null,
+      receiptGasUsed: confirmation?.receipt?.gasUsed ?? null,
+      receiptTransactionHash: confirmation?.receipt?.transactionHash ?? null,
     });
 
     if (confirmation) {
@@ -194,22 +193,47 @@ async function tryGetUserOperationReceipt(
   userOpHash: Hash,
 ) {
   try {
-    return await withTimeout(
-      bundlerClient.getUserOperationReceipt({
-        hash: userOpHash,
-      }),
+    const receipt = await withTimeout(
+      requestRawUserOperationReceipt(bundlerClient, userOpHash),
       UNLOCK_LOOKUP_TIMEOUT_MS,
       "unlock getUserOperationReceipt",
     );
-  } catch (error) {
+
+    const blockNumber = receipt?.receipt?.blockNumber ?? null;
+    const gasUsed = receipt?.receipt?.gasUsed ?? null;
+    const transactionHash = receipt?.receipt?.transactionHash ?? null;
+
+    console.info("[unlock] receipt.blockNumber =", blockNumber, {
+      userOpHash,
+    });
+    console.info("[unlock] receipt.gasUsed =", gasUsed, {
+      userOpHash,
+    });
+    console.info("[unlock] receipt.transactionHash =", transactionHash, {
+      userOpHash,
+    });
+
     if (
-      error instanceof UserOperationReceiptNotFoundError ||
-      isUnlockTimeoutError(error)
+      blockNumber == null ||
+      gasUsed == null ||
+      transactionHash == null
     ) {
       return null;
     }
 
-    throw error;
+    return {
+      receipt: {
+        blockNumber,
+        gasUsed,
+        transactionHash,
+      },
+    };
+  } catch (error) {
+    console.info("[unlock] receipt lookup returned pending", {
+      userOpHash,
+      error: error instanceof Error ? error.message : "unknown error",
+    });
+    return null;
   }
 }
 
@@ -218,22 +242,36 @@ async function tryGetUserOperation(
   userOpHash: Hash,
 ) {
   try {
-    return await withTimeout(
-      bundlerClient.getUserOperation({
-        hash: userOpHash,
-      }),
+    const userOperation = await withTimeout(
+      requestRawUserOperation(bundlerClient, userOpHash),
       UNLOCK_LOOKUP_TIMEOUT_MS,
       "unlock getUserOperation",
     );
-  } catch (error) {
-    if (
-      error instanceof UserOperationNotFoundError ||
-      isUnlockTimeoutError(error)
-    ) {
+
+    const blockNumber = userOperation?.blockNumber ?? null;
+    const transactionHash = userOperation?.transactionHash ?? null;
+
+    console.info("[unlock] userOp.blockNumber =", blockNumber, {
+      userOpHash,
+    });
+    console.info("[unlock] userOp.transactionHash =", transactionHash, {
+      userOpHash,
+    });
+
+    if (blockNumber == null || transactionHash == null) {
       return null;
     }
 
-    throw error;
+    return {
+      blockNumber,
+      transactionHash,
+    };
+  } catch (error) {
+    console.info("[unlock] userOp lookup returned pending", {
+      userOpHash,
+      error: error instanceof Error ? error.message : "unknown error",
+    });
+    return null;
   }
 }
 
@@ -270,4 +308,67 @@ async function withTimeout<T>(
       clearTimeout(timeoutId);
     }
   }
+}
+
+async function requestRawUserOperationReceipt(
+  bundlerClient: UsdcBundlerClient,
+  userOpHash: Hash,
+) {
+  const request = (bundlerClient as unknown as {
+    request?: (params: {
+      method: string;
+      params: Array<Hash>;
+    }) => Promise<any>;
+  }).request;
+
+  if (!request) {
+    return null;
+  }
+
+  const receipt = await request({
+    method: "eth_getUserOperationReceipt",
+    params: [userOpHash],
+  });
+
+  if (!receipt) {
+    return null;
+  }
+
+  return receipt as {
+    receipt?: {
+      blockNumber?: string | null;
+      gasUsed?: string | null;
+      transactionHash?: Hash | null;
+    } | null;
+  };
+}
+
+async function requestRawUserOperation(
+  bundlerClient: UsdcBundlerClient,
+  userOpHash: Hash,
+) {
+  const request = (bundlerClient as unknown as {
+    request?: (params: {
+      method: string;
+      params: Array<Hash>;
+    }) => Promise<any>;
+  }).request;
+
+  if (!request) {
+    return null;
+  }
+
+  const result = await request({
+    method: "eth_getUserOperationByHash",
+    params: [userOpHash],
+  });
+
+  if (!result) {
+    return null;
+  }
+
+  return result as {
+    blockNumber?: string | null;
+    transactionHash?: Hash | null;
+  };
 }
