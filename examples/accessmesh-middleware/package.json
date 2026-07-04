@@ -1,0 +1,18 @@
+{
+  "name": "accessmesh-middleware-example",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Express integration example for protecting premium endpoints with AccessMesh.",
+  "main": "accessmesh-middleware.js",
+  "scripts": {
+    "dev": "node --watch demo-server.js",
+    "start": "node demo-server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
