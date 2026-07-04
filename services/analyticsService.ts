@@ -42,14 +42,14 @@ export async function getProtocolStats(): Promise<ProtocolStats> {
       getBridgeAnalytics(),
     ]);
 
-  const purchaseTxHashes = new Set(purchases.map((purchase) => purchase.txHash));
+  const purchaseTxHashes = new Set(purchases.map((purchase: any) => purchase.txHash));
   const settledPaymentFallbacks = settledPayments.filter(
-    (payment) => !purchaseTxHashes.has(payment.txHash),
+    (payment: any) => !purchaseTxHashes.has(payment.txHash),
   );
   const totalUnlocks = purchases.length + settledPaymentFallbacks.length;
   const totalUSDCVolume =
-    purchases.reduce((sum, purchase) => sum + purchase.amountUSDC, 0) +
-    settledPaymentFallbacks.reduce((sum, payment) => sum + payment.amountUSDC, 0);
+    purchases.reduce((sum: number, purchase: any) => sum + purchase.amountUSDC, 0) +
+    settledPaymentFallbacks.reduce((sum: number, payment: any) => sum + payment.amountUSDC, 0);
 
   return {
     totalResources,
@@ -99,9 +99,9 @@ export async function getCreatorAnalytics(
     paymentResourceCounts.set(payment.resourceId, existing);
   }
 
-  const resourcePerformance = resources.map((resource) => {
+  const resourcePerformance = resources.map((resource: any) => {
     const settledFromPurchases = resource.purchases.reduce(
-      (sum, purchase) => sum + purchase.amountUSDC,
+      (sum: number, purchase: any) => sum + purchase.amountUSDC,
       0,
     );
     const fallbackSettlement = paymentResourceCounts.get(resource.id);
@@ -127,11 +127,11 @@ export async function getCreatorAnalytics(
   )[0];
 
   const revenueEarned = resourcePerformance.reduce(
-    (sum, resource) => sum + resource.revenue,
+    (sum: number, resource: any) => sum + resource.revenue,
     0,
   );
   const totalUnlocks = resourcePerformance.reduce(
-    (sum, resource) => sum + resource.unlockCount,
+    (sum: number, resource: any) => sum + resource.unlockCount,
     0,
   );
 
@@ -202,9 +202,9 @@ export async function getCreatorProfile(wallet: string): Promise<CreatorProfile>
     paymentResourceCounts.set(payment.resourceId, existing);
   }
 
-  const resourcesWithRevenue = resources.map((resource) => {
+  const resourcesWithRevenue = resources.map((resource: any) => {
     const settledFromPurchases = resource.purchases.reduce(
-      (sum, purchase) => sum + purchase.amountUSDC,
+      (sum: number, purchase: any) => sum + purchase.amountUSDC,
       0,
     );
     const fallbackSettlement = paymentResourceCounts.get(resource.id);
@@ -229,11 +229,11 @@ export async function getCreatorProfile(wallet: string): Promise<CreatorProfile>
   )[0];
 
   const revenueEarned = resourcesWithRevenue.reduce(
-    (sum, resource) => sum + resource.revenue,
+    (sum: number, resource: any) => sum + resource.revenue,
     0,
   );
   const totalUnlocks = resourcesWithRevenue.reduce(
-    (sum, resource) => sum + resource.unlockCount,
+    (sum: number, resource: any) => sum + resource.unlockCount,
     0,
   );
 
@@ -259,10 +259,10 @@ export async function getCreatedResourceSummaries(
     include: { purchases: true },
   });
 
-  return resources.map((resource) => ({
+  return resources.map((resource: any) => ({
     ...serializeResource(resource),
     revenue: resource.purchases.reduce(
-      (sum, purchase) => sum + purchase.amountUSDC,
+      (sum: number, purchase: any) => sum + purchase.amountUSDC,
       0,
     ) * CREATOR_REVENUE_SHARE,
   }));

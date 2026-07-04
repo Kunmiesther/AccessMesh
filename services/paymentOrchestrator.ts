@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { type Address, type Hash } from "viem";
 import { buildCircleSendRequirement } from "@/lib/circle";
 import { prisma } from "@/lib/prisma";
@@ -291,7 +292,7 @@ function buildPaymentTransfers(params: {
 export async function finalizePayment(txHashInput: string) {
   const txHash = normalizeTxHash(txHashInput);
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx: any) => {
     const payment = await tx.payment.findUnique({
       where: { txHash },
     });
@@ -338,7 +339,7 @@ export async function finalizePayment(txHashInput: string) {
     });
 
     return settledPayment;
-  }).then(async (payment) => {
+  }).then(async (payment: any) => {
     await logPaymentConfirmed({
       resourceId: payment.resourceId,
       payerWallet: payment.payerWallet,
@@ -388,7 +389,7 @@ async function createPendingPayment(params: {
     });
   } catch (error) {
     if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error instanceof PrismaClientKnownRequestError &&
       error.code === "P2002"
     ) {
       const existing = await prisma.payment.findUnique({

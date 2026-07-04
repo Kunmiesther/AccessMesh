@@ -215,7 +215,7 @@ export async function listWalletBridgeActivity(wallet: string, limit = 20) {
     take: limit,
   });
 
-  return bridges.map((bridge) =>
+  return bridges.map((bridge: any) =>
     serializeBridge(bridge, bridge.resource.title || bridge.resource.name),
   );
 }
@@ -229,7 +229,7 @@ export async function getBridgeAnalytics() {
   });
 
   return bridges.reduce(
-    (stats, bridge) => {
+    (stats: any, bridge: any) => {
       stats.totalBridgedVolume += bridge.amountUSDC;
       stats.numberOfBridges += 1;
 

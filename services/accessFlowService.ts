@@ -1,5 +1,6 @@
 import { createHmac, randomBytes } from "crypto";
 import { Prisma } from "@prisma/client";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { type Address, type Hash } from "viem";
 import { buildCircleSendRequirement } from "@/lib/circle";
 import { prisma } from "@/lib/prisma";
@@ -367,7 +368,7 @@ async function reservePayment(params: {
     });
   } catch (error) {
     if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error instanceof PrismaClientKnownRequestError &&
       error.code === "P2002"
     ) {
       throw new InputError("txHash has already been submitted");
@@ -382,7 +383,7 @@ async function settlePayment(params: {
   resourceId: string;
   payerWallet: Address;
 }) {
-  const settlement = await prisma.$transaction(async (tx) => {
+  const settlement = await prisma.$transaction(async (tx: any) => {
     const payment = await tx.payment.findUnique({
       where: { txHash: params.txHash },
     });
