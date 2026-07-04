@@ -83,6 +83,7 @@ export default function LandingPage() {
 
       <main>
         <section
+          className="landing-hero"
           style={{
             minHeight: "calc(100vh - 56px)",
             position: "relative",
@@ -93,6 +94,7 @@ export default function LandingPage() {
           }}
         >
           <img
+            className="landing-hero-media"
             src="/images/hero-visual.jpg"
             alt=""
             aria-hidden="true"
@@ -107,6 +109,7 @@ export default function LandingPage() {
             }}
           />
           <div
+            className="landing-hero-overlay"
             style={{
               position: "absolute",
               inset: 0,
@@ -115,6 +118,7 @@ export default function LandingPage() {
             }}
           />
           <div
+            className="landing-hero-inner"
             style={{
               position: "relative",
               zIndex: 1,
@@ -152,7 +156,7 @@ export default function LandingPage() {
             <p
               style={{
                 maxWidth: 620,
-                fontSize: 18,
+                fontSize: "clamp(16px, 3.6vw, 18px)",
                 lineHeight: 1.7,
                 color: "var(--text-secondary)",
                 marginBottom: 30,
@@ -161,7 +165,7 @@ export default function LandingPage() {
               Unlock premium knowledge with USDC. Create valuable resources.
               Own your reputation on-chain.
             </p>
-            <div style={heroActionsStyle}>
+            <div className="landing-hero-actions" style={heroActionsStyle}>
               <Link href="/create" style={primaryButtonStyle}>
                 Publish Resource
               </Link>
@@ -373,11 +377,8 @@ function SectionHeader({
 }) {
   return (
     <div
+      className="section-header-row"
       style={{
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "end",
-        gap: 16,
         marginBottom: 18,
       }}
     >

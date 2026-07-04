@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CSSProperties, ReactNode } from "react";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState, type RefObject } from "react";
 import { type Address } from "viem";
 import { CoverImageUpload } from "@/components/CoverImageUpload";
 import { Navbar } from "@/components/Navbar";
+import { markdownToHtml } from "@/lib/markdown";
 import { getPublishFeeConfig, postResource } from "@/lib/api";
 import { executePublishFeePayment } from "@/lib/publish-payment";
 import { useWallet } from "@/lib/ui/WalletContext";
@@ -47,6 +48,12 @@ type PublishState =
   | { status: "error"; message: string };
 
 type PendingResourceRequest = Omit<CreateResourceRequest, "publishTxHash">;
+type EditorMode = "write" | "preview";
+type MarkdownInsertionResult = {
+  value: string;
+  selectionStart: number;
+  selectionEnd: number;
+};
 
 const PUBLISH_PAYMENT_CONFIRMATION_TIMEOUT_MS = 300_000;
 
@@ -65,10 +72,12 @@ export function CreateResourcePage() {
   const [priceUSDC, setPriceUSDC] = useState("");
   const [resourceType, setResourceType] = useState<PublishedResourceType>("ARTICLE");
   const [articleContent, setArticleContent] = useState("");
+  const [editorMode, setEditorMode] = useState<EditorMode>("write");
   const [resourceFile, setResourceFile] = useState<File | null>(null);
   const [externalUrl, setExternalUrl] = useState("");
   const [coverImageFile, setCoverImageFile] = useState<File | null>(null);
   const [tags, setTags] = useState("");
+  const articleTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (ready && !connected) {
@@ -235,10 +244,16 @@ export function CreateResourcePage() {
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
       <Navbar />
-      <main style={{ maxWidth: 920, margin: "0 auto", padding: "44px 24px 80px" }}>
+      <main className="page-main" style={{ maxWidth: 920 }}>
         <header style={{ marginBottom: 28 }}>
           <p style={eyebrowStyle}>Create resource</p>
-          <h1 style={{ fontSize: 30, color: "var(--text-primary)", marginBottom: 10 }}>
+          <h1
+            style={{
+              fontSize: "clamp(28px, 6vw, 30px)",
+              color: "var(--text-primary)",
+              marginBottom: 10,
+            }}
+          >
             Publish a paid resource
           </h1>
           <p style={bodyStyle}>
@@ -257,7 +272,7 @@ export function CreateResourcePage() {
         </header>
 
         {ready && connected && address ? (
-          <form onSubmit={handleSubmit} style={panelStyle}>
+          <form onSubmit={handleSubmit} className="responsive-panel-padding" style={panelStyle}>
             <div style={gridStyle}>
               <Field label="Title" htmlFor="title" required>
                 <input
@@ -332,6 +347,7 @@ export function CreateResourcePage() {
                     setResourceType(event.target.value as PublishedResourceType);
                     setState({ status: "idle" });
                     setArticleContent("");
+                    setEditorMode("write");
                     setResourceFile(null);
                     setExternalUrl("");
                   }}
@@ -349,24 +365,69 @@ export function CreateResourcePage() {
 
               {resourceType === "ARTICLE" && (
                 <Field label="Markdown editor" htmlFor="articleContent" required>
-                  <textarea
-                    id="articleContent"
-                    value={articleContent}
-                    disabled={disabled}
-                    onChange={(event) => setArticleContent(event.target.value)}
-                    required
-                    rows={12}
-                    placeholder="# Start writing..."
-                    spellCheck={false}
-                    style={{
-                      ...inputStyle,
-                      minHeight: 280,
-                      fontFamily: "var(--font-mono)",
-                      lineHeight: 1.65,
-                    }}
-                  />
+                  <div style={editorShellStyle}>
+                    <div style={editorHeaderStyle}>
+                      <div style={toolbarStyle}>
+                        {markdownToolbarItems.map((item) => (
+                          <button
+                            key={item.label}
+                            type="button"
+                            disabled={disabled || editorMode !== "write"}
+                            onClick={() =>
+                              applyArticleMarkdown(articleTextareaRef, setArticleContent, item.insert)
+                            }
+                            style={toolbarButtonStyle}
+                            title={item.title}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div style={editorModeToggleStyle}>
+                        <button
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => setEditorMode("write")}
+                          style={{
+                            ...editorModeButtonStyle,
+                            ...(editorMode === "write" ? activeEditorModeButtonStyle : {}),
+                          }}
+                        >
+                          Write
+                        </button>
+                        <button
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => setEditorMode("preview")}
+                          style={{
+                            ...editorModeButtonStyle,
+                            ...(editorMode === "preview" ? activeEditorModeButtonStyle : {}),
+                          }}
+                        >
+                          Preview
+                        </button>
+                      </div>
+                    </div>
+
+                    {editorMode === "write" ? (
+                      <textarea
+                        id="articleContent"
+                        ref={articleTextareaRef}
+                        value={articleContent}
+                        disabled={disabled}
+                        onChange={(event) => setArticleContent(event.target.value)}
+                        required
+                        rows={12}
+                        placeholder="# Start writing..."
+                        spellCheck={false}
+                        style={articleTextareaStyle}
+                      />
+                    ) : (
+                      <MarkdownPreview markdown={articleContent} />
+                    )}
+                  </div>
                   <p style={helperTextStyle}>
-                    Markdown is supported for headings, lists, links, and code blocks.
+                    Supports headings, bold, italic, lists, links, images, blockquotes, inline code, code blocks, and live preview.
                   </p>
                 </Field>
               )}
@@ -459,14 +520,14 @@ export function CreateResourcePage() {
             </div>
           </form>
         ) : ready && !connected ? (
-          <section style={panelStyle}>
+          <section className="responsive-panel-padding" style={panelStyle}>
             <p style={bodyStyle}>Connect your authenticated wallet before publishing.</p>
             <Link href="/wallet?next=/create" style={{ ...primaryButtonStyle, marginTop: 16 }}>
               Connect Wallet
             </Link>
           </section>
         ) : (
-          <section style={panelStyle}>
+          <section className="responsive-panel-padding" style={panelStyle}>
             <p style={bodyStyle}>Restoring authenticated wallet...</p>
           </section>
         )}
@@ -507,6 +568,130 @@ function Field({
   );
 }
 
+function MarkdownPreview({ markdown }: { markdown: string }) {
+  return (
+    <div style={markdownPreviewShellStyle}>
+      {markdown.trim().length > 0 ? (
+        <div
+          className="editor-markdown-preview"
+          dangerouslySetInnerHTML={{ __html: markdownToHtml(markdown) }}
+        />
+      ) : (
+        <p style={emptyPreviewStyle}>
+          Preview your article here. Use the toolbar to insert markdown syntax.
+        </p>
+      )}
+      <style jsx>{`
+        .editor-markdown-preview {
+          color: var(--text-secondary);
+          line-height: 1.75;
+          overflow-wrap: anywhere;
+        }
+
+        .editor-markdown-preview h1,
+        .editor-markdown-preview h2,
+        .editor-markdown-preview h3,
+        .editor-markdown-preview h4,
+        .editor-markdown-preview h5,
+        .editor-markdown-preview h6 {
+          color: var(--text-primary);
+          line-height: 1.2;
+          margin: 1.2em 0 0.6em;
+        }
+
+        .editor-markdown-preview h1 {
+          font-size: 28px;
+        }
+
+        .editor-markdown-preview h2 {
+          font-size: 24px;
+        }
+
+        .editor-markdown-preview h3 {
+          font-size: 20px;
+        }
+
+        .editor-markdown-preview p,
+        .editor-markdown-preview ul,
+        .editor-markdown-preview ol,
+        .editor-markdown-preview blockquote,
+        .editor-markdown-preview pre {
+          margin: 0 0 1em;
+        }
+
+        .editor-markdown-preview ul,
+        .editor-markdown-preview ol {
+          padding-left: 1.25rem;
+        }
+
+        .editor-markdown-preview li {
+          margin: 0.35em 0;
+        }
+
+        .editor-markdown-preview strong {
+          color: var(--text-primary);
+        }
+
+        .editor-markdown-preview blockquote {
+          border-left: 3px solid var(--border);
+          padding-left: 1rem;
+          color: var(--text-muted);
+        }
+
+        .editor-markdown-preview code {
+          font-family: var(--font-mono);
+          font-size: 0.95em;
+          background: rgba(255, 255, 255, 0.05);
+          padding: 0.08em 0.35em;
+          border-radius: 4px;
+        }
+
+        .editor-markdown-preview pre {
+          overflow-x: auto;
+          background: #0a0a0a;
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          padding: 14px;
+        }
+
+        .editor-markdown-preview pre code {
+          background: transparent;
+          padding: 0;
+        }
+
+        .editor-markdown-preview a {
+          color: var(--accent);
+          text-decoration: underline;
+          text-underline-offset: 2px;
+        }
+
+        .editor-markdown-preview img {
+          display: block;
+          max-width: 100%;
+          height: auto;
+          margin: 1.1rem 0;
+          border-radius: 10px;
+          border: 1px solid var(--border);
+        }
+
+        @media (max-width: 640px) {
+          .editor-markdown-preview h1 {
+            font-size: 24px;
+          }
+
+          .editor-markdown-preview h2 {
+            font-size: 21px;
+          }
+
+          .editor-markdown-preview h3 {
+            font-size: 18px;
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 function PublishConfirmationModal({
   feeUSDC,
   treasuryWallet,
@@ -530,7 +715,7 @@ function PublishConfirmationModal({
 
   return (
     <div style={modalOverlayStyle} role="dialog" aria-modal="true">
-      <section style={modalPanelStyle}>
+      <section className="responsive-panel-padding" style={modalPanelStyle}>
         <p style={eyebrowStyle}>Protocol fee</p>
         <h2 style={modalTitleStyle}>Confirm publishing</h2>
         <p style={bodyStyle}>
@@ -620,6 +805,199 @@ async function buildResourceData(params: {
   };
 }
 
+function applyArticleMarkdown(
+  textareaRef: RefObject<HTMLTextAreaElement | null>,
+  setArticleContent: (value: string) => void,
+  formatter: (
+    value: string,
+    selectionStart: number,
+    selectionEnd: number,
+  ) => MarkdownInsertionResult,
+) {
+  const textarea = textareaRef.current;
+  if (!textarea) {
+    return;
+  }
+
+  const result = formatter(
+    textarea.value,
+    textarea.selectionStart,
+    textarea.selectionEnd,
+  );
+  setArticleContent(result.value);
+
+  window.requestAnimationFrame(() => {
+    textarea.focus();
+    textarea.setSelectionRange(result.selectionStart, result.selectionEnd);
+  });
+}
+
+function wrapSelection(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+  prefix: string,
+  suffix: string,
+  placeholder: string,
+): MarkdownInsertionResult {
+  const selectedText = value.slice(selectionStart, selectionEnd);
+  const content = selectedText || placeholder;
+  const nextValue =
+    value.slice(0, selectionStart) +
+    prefix +
+    content +
+    suffix +
+    value.slice(selectionEnd);
+
+  return {
+    value: nextValue,
+    selectionStart: selectionStart + prefix.length,
+    selectionEnd: selectionStart + prefix.length + content.length,
+  };
+}
+
+function insertSnippet(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+  snippet: string,
+  focusStartOffset: number,
+  focusLength: number,
+): MarkdownInsertionResult {
+  const nextValue =
+    value.slice(0, selectionStart) + snippet + value.slice(selectionEnd);
+  return {
+    value: nextValue,
+    selectionStart: selectionStart + focusStartOffset,
+    selectionEnd: selectionStart + focusStartOffset + focusLength,
+  };
+}
+
+function prefixSelectedLines(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+  formatter: (line: string, index: number) => string,
+  placeholder: string,
+): MarkdownInsertionResult {
+  const blockStart = value.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
+  const rawSelection = value.slice(blockStart, selectionEnd);
+  const baseBlock = rawSelection.length > 0 ? rawSelection : placeholder;
+  const nextBlock = baseBlock
+    .split("\n")
+    .map((line, index) => formatter(line || placeholder, index))
+    .join("\n");
+  const nextValue =
+    value.slice(0, blockStart) + nextBlock + value.slice(selectionEnd);
+
+  return {
+    value: nextValue,
+    selectionStart: blockStart,
+    selectionEnd: blockStart + nextBlock.length,
+  };
+}
+
+const markdownToolbarItems = [
+  {
+    label: "B",
+    title: "Bold",
+    insert: (value: string, selectionStart: number, selectionEnd: number) =>
+      wrapSelection(value, selectionStart, selectionEnd, "**", "**", "bold text"),
+  },
+  {
+    label: "I",
+    title: "Italic",
+    insert: (value: string, selectionStart: number, selectionEnd: number) =>
+      wrapSelection(value, selectionStart, selectionEnd, "*", "*", "italic text"),
+  },
+  {
+    label: "H",
+    title: "Heading",
+    insert: (value: string, selectionStart: number, selectionEnd: number) =>
+      prefixSelectedLines(
+        value,
+        selectionStart,
+        selectionEnd,
+        (line) => `## ${line}`,
+        "Heading",
+      ),
+  },
+  {
+    label: "• List",
+    title: "Bullet list",
+    insert: (value: string, selectionStart: number, selectionEnd: number) =>
+      prefixSelectedLines(
+        value,
+        selectionStart,
+        selectionEnd,
+        (line) => `- ${line}`,
+        "List item",
+      ),
+  },
+  {
+    label: "1. List",
+    title: "Numbered list",
+    insert: (value: string, selectionStart: number, selectionEnd: number) =>
+      prefixSelectedLines(
+        value,
+        selectionStart,
+        selectionEnd,
+        (_line, index) => `${index + 1}. ${_line}`,
+        "List item",
+      ),
+  },
+  {
+    label: "Link",
+    title: "Link",
+    insert: (value: string, selectionStart: number, selectionEnd: number) =>
+      insertSnippet(
+        value,
+        selectionStart,
+        selectionEnd,
+        "[link text](https://example.com)",
+        1,
+        "link text".length,
+      ),
+  },
+  {
+    label: "Image",
+    title: "Image",
+    insert: (value: string, selectionStart: number, selectionEnd: number) =>
+      insertSnippet(
+        value,
+        selectionStart,
+        selectionEnd,
+        "![alt text](https://example.com/image.jpg)",
+        2,
+        "alt text".length,
+      ),
+  },
+  {
+    label: "Quote",
+    title: "Blockquote",
+    insert: (value: string, selectionStart: number, selectionEnd: number) =>
+      prefixSelectedLines(
+        value,
+        selectionStart,
+        selectionEnd,
+        (line) => `> ${line}`,
+        "Quoted text",
+      ),
+  },
+  {
+    label: "</>",
+    title: "Code block",
+    insert: (value: string, selectionStart: number, selectionEnd: number) =>
+      wrapSelection(value, selectionStart, selectionEnd, "```\n", "\n```", "code"),
+  },
+  {
+    label: "`code`",
+    title: "Inline code",
+    insert: (value: string, selectionStart: number, selectionEnd: number) =>
+      wrapSelection(value, selectionStart, selectionEnd, "`", "`", "code"),
+  },
+] as const;
+
 function getPublishErrorMessage(error: unknown) {
   if (error instanceof Error) {
     if (/timed out while waiting for user operation/i.test(error.message)) {
@@ -707,6 +1085,90 @@ const helperTextStyle = {
   color: "var(--text-muted)",
   fontSize: 12,
   lineHeight: 1.6,
+} satisfies CSSProperties;
+
+const editorShellStyle = {
+  border: "1px solid var(--border)",
+  borderRadius: 10,
+  overflow: "hidden",
+  background: "#0a0a0a",
+} satisfies CSSProperties;
+
+const editorHeaderStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  flexWrap: "wrap",
+  padding: 12,
+  borderBottom: "1px solid var(--border)",
+  background: "rgba(255,255,255,0.02)",
+} satisfies CSSProperties;
+
+const toolbarStyle = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+  minWidth: 0,
+} satisfies CSSProperties;
+
+const toolbarButtonStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 34,
+  padding: "0 10px",
+  background: "rgba(255,255,255,0.02)",
+  color: "var(--text-secondary)",
+  border: "1px solid var(--border)",
+  borderRadius: 6,
+  fontSize: 12,
+  fontFamily: "var(--font-mono)",
+  cursor: "pointer",
+} satisfies CSSProperties;
+
+const editorModeToggleStyle = {
+  display: "inline-flex",
+  gap: 8,
+  flexWrap: "wrap",
+} satisfies CSSProperties;
+
+const editorModeButtonStyle = {
+  minHeight: 34,
+  padding: "0 12px",
+  background: "transparent",
+  color: "var(--text-secondary)",
+  border: "1px solid var(--border)",
+  borderRadius: 6,
+  fontSize: 12,
+  fontWeight: 600,
+  cursor: "pointer",
+} satisfies CSSProperties;
+
+const activeEditorModeButtonStyle = {
+  background: "var(--accent)",
+  color: "#000",
+  border: "1px solid var(--accent)",
+} satisfies CSSProperties;
+
+const articleTextareaStyle = {
+  ...inputStyle,
+  minHeight: 320,
+  border: "0",
+  borderRadius: 0,
+  fontFamily: "var(--font-mono)",
+  lineHeight: 1.65,
+  resize: "vertical",
+} satisfies CSSProperties;
+
+const markdownPreviewShellStyle = {
+  minHeight: 320,
+  padding: 18,
+} satisfies CSSProperties;
+
+const emptyPreviewStyle = {
+  color: "var(--text-muted)",
+  fontSize: 13,
+  lineHeight: 1.7,
 } satisfies CSSProperties;
 
 const messageStyle = {

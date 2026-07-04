@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Navbar } from "@/components/Navbar";
 import { WalletCopyButton } from "@/components/WalletCopyButton";
 import { arcExplorerAddressUrl, formatDate, formatUSDC, shortAddress } from "@/lib/ui";
 import { getCreatorProfile } from "@/services/analyticsService";
@@ -15,13 +16,14 @@ export default async function CreatorProfilePage({ params }: Props) {
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
-      <main style={{ maxWidth: 1200, margin: "0 auto", padding: "44px 24px 80px" }}>
+      <Navbar />
+      <main className="page-main" style={{ maxWidth: 1200 }}>
         <Link href="/explore" style={backLinkStyle}>
           Back to marketplace
         </Link>
 
-        <section style={heroStyle}>
-          <div style={heroCopyStyle}>
+        <section className="responsive-split-hero" style={heroStyle}>
+          <div className="responsive-panel-padding" style={heroCopyStyle}>
             <p style={eyebrowStyle}>Creator profile</p>
             {profile.displayName ? (
               <h1 style={titleStyle}>{profile.displayName}</h1>
@@ -48,7 +50,7 @@ export default async function CreatorProfilePage({ params }: Props) {
             </div>
           </div>
 
-          <div style={statsGridStyle}>
+          <div className="hero-stats-mobile" style={statsGridStyle}>
             <StatCard label="Resources" value={profile.resourcesPublished} />
             <StatCard label="Revenue" value={formatUSDC(profile.revenueEarned)} />
             <StatCard label="Unlocks" value={profile.unlockCount} />
@@ -60,7 +62,7 @@ export default async function CreatorProfilePage({ params }: Props) {
           <SectionHeader eyebrow="Top resource" title="Highest earning publication" />
           {profile.topResource ? (
             <Link href={`/resource/${profile.topResource.id}`} style={topResourceCardStyle}>
-              <div style={topResourceHeaderStyle}>
+              <div className="top-resource-header-mobile" style={topResourceHeaderStyle}>
                 <div>
                   <p style={resourceTypeStyle}>
                     {profile.topResource.resourceCategory ?? profile.topResource.category}
@@ -100,7 +102,7 @@ export default async function CreatorProfilePage({ params }: Props) {
                   <div style={resourceCardBodyStyle}>
                     <h3 style={resourceCardTitleStyle}>{resource.title}</h3>
                     <p style={resourceCardDescriptionStyle}>{resource.description}</p>
-                    <div style={resourceCardMetaStyle}>
+                    <div className="resource-card-meta-mobile" style={resourceCardMetaStyle}>
                       <MetaItem label="Revenue" value={formatUSDC(resource.revenue)} />
                       <MetaItem label="Unlocks" value={resource.unlockCount} />
                     </div>
@@ -164,7 +166,7 @@ const backLinkStyle = {
 
 const heroStyle = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.2fr) minmax(320px, 0.8fr)",
+  gridTemplateColumns: "minmax(0, 1.2fr) minmax(min(100%, 320px), 0.8fr)",
   gap: 18,
   alignItems: "stretch",
   marginBottom: 28,
@@ -188,7 +190,7 @@ const eyebrowStyle = {
 } as const;
 
 const titleStyle = {
-  fontSize: 36,
+  fontSize: "clamp(30px, 7vw, 36px)",
   lineHeight: 1.08,
   color: "var(--text-primary)",
   marginBottom: 10,
@@ -335,7 +337,7 @@ const metaValueStyle = {
 
 const resourceGridStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 250px), 1fr))",
   gap: 16,
 } as const;
 

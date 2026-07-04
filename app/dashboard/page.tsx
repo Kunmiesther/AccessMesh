@@ -106,10 +106,16 @@ export default function DashboardPage() {
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
       <Navbar />
 
-      <main style={{ maxWidth: 1200, margin: "0 auto", padding: "44px 24px 80px" }}>
+      <main className="page-main" style={{ maxWidth: 1200 }}>
         <header style={{ marginBottom: 28 }}>
           <p style={eyebrowStyle}>Dashboard</p>
-          <h1 style={{ fontSize: 30, color: "var(--text-primary)", marginBottom: 10 }}>
+          <h1
+            style={{
+              fontSize: "clamp(28px, 6vw, 30px)",
+              color: "var(--text-primary)",
+              marginBottom: 10,
+            }}
+          >
             Protocol analytics
           </h1>
           <p style={{ fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.7 }}>
@@ -264,7 +270,7 @@ export default function DashboardPage() {
                       <div style={resourceCardBodyStyle}>
                         <h3 style={resourceCardTitleStyle}>{resource.title}</h3>
                         <p style={resourceCardDescriptionStyle}>{resource.description}</p>
-                        <div style={resourceCardMetaStyle}>
+                        <div className="resource-card-meta-mobile" style={resourceCardMetaStyle}>
                           <MetaBlock label="Revenue" value={formatUSDC(resource.revenue)} />
                           <MetaBlock label="Unlocks" value={resource.unlockCount} />
                         </div>
@@ -298,7 +304,7 @@ export default function DashboardPage() {
               <SectionHeader eyebrow="Cross-chain activity" title="CCTP bridge history" />
               {dashboard.crossChainActivity.length > 0 ? (
                 <div style={bridgeTableStyle}>
-                  <div style={bridgeHeaderStyle}>
+                  <div className="bridge-table-header-mobile" style={bridgeHeaderStyle}>
                     {["Route", "Amount", "Status", "Timestamp"].map((label) => (
                       <span key={label} style={bridgeHeaderCellStyle}>
                         {label}
@@ -425,7 +431,7 @@ function PurchaseRow({
     purchase.creatorDisplayName?.trim() || shortAddress(purchase.creatorWallet);
 
   return (
-    <div style={purchaseRowStyle}>
+    <div className="purchase-row-mobile" style={purchaseRowStyle}>
       <div style={{ minWidth: 0 }}>
         <div style={purchaseTitleRowStyle}>
           <Link href={`/resource/${purchase.resourceId}`} style={purchaseTitleStyle}>
@@ -455,7 +461,7 @@ function BridgeRow({ entry }: { entry: BridgeActivityEntry }) {
   const txHash = entry.destinationTxHash ?? entry.sourceTxHash;
 
   return (
-    <div style={bridgeRowStyle}>
+    <div className="bridge-table-row-mobile" style={bridgeRowStyle}>
       <div style={{ minWidth: 0 }}>
         <p style={bridgeRouteStyle}>
           {entry.sourceChain} to {entry.destinationChain}
@@ -522,7 +528,7 @@ function ActivityRow({ entry }: { entry: RecentActivityEntry }) {
   const resourceTitle = entry.resourceTitle || entry.resourceName;
 
   return (
-    <div style={activityRowStyle}>
+    <div className="activity-row-mobile" style={activityRowStyle}>
       <div style={{ minWidth: 0 }}>
         <p style={activityTypeStyle}>{activityMeta.label}</p>
         <p style={activityTextStyle}>
@@ -926,7 +932,7 @@ const timestampStyle = {
 
 const resourceGridStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 250px), 1fr))",
   gap: 16,
 } satisfies CSSProperties;
 
@@ -1000,7 +1006,7 @@ const resourcePriceStyle = {
 
 const tripleGridStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
   gap: 16,
 } satisfies CSSProperties;
 

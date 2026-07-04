@@ -22,16 +22,7 @@ export function Navbar() {
       }}
     >
       <div
-        style={{
-          maxWidth: 1200,
-          margin: "0 auto",
-          padding: "0 24px",
-          height: 56,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 24,
-        }}
+        className="navbar-shell"
       >
         <Link
           href="/"
@@ -51,14 +42,7 @@ export function Navbar() {
           <span style={{ color: "var(--accent)" }}>AccessMesh</span>
         </Link>
 
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 16,
-            marginLeft: "auto",
-          }}
-        >
+        <div className="navbar-links">
           <Link href="/explore" style={navLinkStyle}>
             Explore
           </Link>
@@ -81,7 +65,7 @@ export function Navbar() {
           </a>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div className="navbar-wallet">
           {!ready ? (
             <span
               style={{

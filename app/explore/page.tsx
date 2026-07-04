@@ -108,9 +108,9 @@ export default function ExplorePage() {
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
       <Navbar />
-      <main style={{ maxWidth: 1240, margin: "0 auto", padding: "44px 24px 80px" }}>
-        <header style={heroStyle}>
-          <div style={heroCopyStyle}>
+      <main className="page-main" style={{ maxWidth: 1240 }}>
+        <header className="responsive-split-hero" style={heroStyle}>
+          <div className="responsive-panel-padding" style={heroCopyStyle}>
             <p style={eyebrowStyle}>Explore</p>
             <h1 style={titleStyle}>Marketplace</h1>
             <p style={subtitleStyle}>
@@ -122,13 +122,13 @@ export default function ExplorePage() {
               </Link>
             </div>
           </div>
-          <div style={heroStatsStyle}>
+          <div className="hero-stats-mobile" style={heroStatsStyle}>
             <StatCard label="Published resources" value={resources.length} />
             <StatCard label="Visible results" value={visibleResources.length} />
           </div>
         </header>
 
-        <section style={toolbarStyle} aria-label="Marketplace filters">
+        <section className="toolbar-mobile" style={toolbarStyle} aria-label="Marketplace filters">
           <label style={fieldStyle}>
             <span style={labelStyle}>Search</span>
             <input
@@ -271,7 +271,7 @@ function StatCard({ label, value }: { label: string; value: number | string }) {
 
 const heroStyle = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.5fr) minmax(320px, 0.85fr)",
+  gridTemplateColumns: "minmax(0, 1.5fr) minmax(min(100%, 320px), 0.85fr)",
   gap: 18,
   alignItems: "stretch",
   marginBottom: 28,
@@ -308,7 +308,7 @@ const eyebrowStyle = {
 } satisfies CSSProperties;
 
 const titleStyle = {
-  fontSize: 36,
+  fontSize: "clamp(30px, 7vw, 36px)",
   lineHeight: 1.08,
   color: "var(--text-primary)",
   marginBottom: 12,
@@ -370,7 +370,7 @@ const primaryActionButtonStyle = {
 
 const gridStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
   gap: 18,
 } satisfies CSSProperties;
 

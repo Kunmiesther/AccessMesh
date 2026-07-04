@@ -5,6 +5,10 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Navbar } from "@/components/Navbar";
+import {
+  looksLikeMarkdownContent as detectMarkdownContent,
+  markdownToHtml as renderMarkdownToHtml,
+} from "@/lib/markdown";
 import { getProtectedResource } from "@/lib/api";
 import {
   appResourceUrl,
@@ -77,7 +81,7 @@ export default function ResourceDetailPage() {
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
       <Navbar />
-      <main style={{ maxWidth: 1024, margin: "0 auto", padding: "44px 24px 80px" }}>
+      <main className="page-main" style={{ maxWidth: 1024 }}>
         <Link href="/explore" style={backLinkStyle}>
           Back to marketplace
         </Link>
@@ -130,9 +134,10 @@ function ResourceHeader({ resource }: { resource: ResourceDetail }) {
 
   return (
     <section style={headerPanelStyle}>
-      <div style={heroGridStyle}>
-        <div style={coverShellStyle}>
+      <div className="responsive-resource-hero" style={heroGridStyle}>
+        <div className="responsive-resource-cover-shell" style={coverShellStyle}>
           <div
+            className="responsive-resource-cover"
             style={{
               ...coverStyle,
               backgroundImage: resource.coverImage
@@ -144,7 +149,7 @@ function ResourceHeader({ resource }: { resource: ResourceDetail }) {
           </div>
         </div>
 
-        <div style={heroCopyStyle}>
+        <div className="responsive-panel-padding" style={heroCopyStyle}>
           <p style={eyebrowStyle}>Resource</p>
           <h1 style={titleStyle}>{resource.title || resource.name}</h1>
           <p style={descriptionStyle}>{resource.description}</p>
@@ -257,7 +262,7 @@ function UnlockedContent({ resource }: { resource: ResourceDetail }) {
 
 function ArticleContent({ resource }: { resource: ResourceDetail }) {
   const markdown = getMarkdownContent(resource);
-  const isMarkdown = looksLikeMarkdownContent(markdown);
+  const isMarkdown = detectMarkdownContent(markdown);
 
   return (
     <div style={{ marginTop: 16, maxWidth: "72ch" }}>
@@ -265,7 +270,7 @@ function ArticleContent({ resource }: { resource: ResourceDetail }) {
         <div
           id={`article-${resource.id}`}
           className="resource-markdown"
-          dangerouslySetInnerHTML={{ __html: markdownToHtml(markdown) }}
+          dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(markdown) }}
         />
       ) : (
         <div id={`article-${resource.id}`} className="resource-plain-text">
@@ -288,7 +293,10 @@ function ArticleContent({ resource }: { resource: ResourceDetail }) {
 
         .resource-markdown h1,
         .resource-markdown h2,
-        .resource-markdown h3 {
+        .resource-markdown h3,
+        .resource-markdown h4,
+        .resource-markdown h5,
+        .resource-markdown h6 {
           color: var(--text-primary);
           line-height: 1.25;
           margin: 1.25em 0 0.6em;
@@ -338,6 +346,10 @@ function ArticleContent({ resource }: { resource: ResourceDetail }) {
           color: var(--text-muted);
         }
 
+        .resource-markdown strong {
+          color: var(--text-primary);
+        }
+
         .resource-markdown code {
           font-family: var(--font-mono);
           font-size: 0.95em;
@@ -363,6 +375,29 @@ function ArticleContent({ resource }: { resource: ResourceDetail }) {
           color: var(--accent);
           text-decoration: underline;
           text-underline-offset: 2px;
+        }
+
+        .resource-markdown img {
+          display: block;
+          max-width: 100%;
+          height: auto;
+          margin: 1.1rem 0;
+          border-radius: 10px;
+          border: 1px solid var(--border);
+        }
+
+        @media (max-width: 640px) {
+          .resource-markdown h1 {
+            font-size: 24px;
+          }
+
+          .resource-markdown h2 {
+            font-size: 20px;
+          }
+
+          .resource-markdown h3 {
+            font-size: 17px;
+          }
         }
       `}</style>
     </div>
@@ -448,7 +483,7 @@ function ResourceActionBar({
   }
 
   return (
-    <div style={resourceActionRowStyle}>
+    <div className="resource-action-row-mobile" style={resourceActionRowStyle}>
       <button type="button" onClick={handleCopyLink} style={secondaryButtonStyle}>
         {copied ? "Link copied" : "Copy resource link"}
       </button>
@@ -726,7 +761,7 @@ const headerPanelStyle = {
 
 const heroGridStyle = {
   display: "grid",
-  gridTemplateColumns: "minmax(320px, 0.9fr) minmax(0, 1.1fr)",
+  gridTemplateColumns: "minmax(min(100%, 320px), 0.9fr) minmax(0, 1.1fr)",
 } satisfies CSSProperties;
 
 const coverShellStyle = {
@@ -772,7 +807,7 @@ const eyebrowStyle = {
 } satisfies CSSProperties;
 
 const titleStyle = {
-  fontSize: 34,
+  fontSize: "clamp(28px, 7vw, 34px)",
   lineHeight: 1.12,
   color: "var(--text-primary)",
   marginBottom: 12,
@@ -801,7 +836,7 @@ const bodyStyle = {
 
 const metaGridStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 160px), 1fr))",
   gap: 12,
 } satisfies CSSProperties;
 
