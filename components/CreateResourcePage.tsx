@@ -6,8 +6,8 @@ import type { CSSProperties, ReactNode } from "react";
 import { FormEvent, useEffect, useRef, useState, type RefObject } from "react";
 import { type Address } from "viem";
 import { CoverImageUpload } from "@/components/CoverImageUpload";
+import { MarkdownContent } from "@/components/MarkdownContent";
 import { Navbar } from "@/components/Navbar";
-import { markdownToHtml } from "@/lib/markdown";
 import { getPublishFeeConfig, postResource } from "@/lib/api";
 import { executePublishFeePayment } from "@/lib/publish-payment";
 import { useWallet } from "@/lib/ui/WalletContext";
@@ -571,123 +571,15 @@ function Field({
 function MarkdownPreview({ markdown }: { markdown: string }) {
   return (
     <div style={markdownPreviewShellStyle}>
-      {markdown.trim().length > 0 ? (
-        <div
-          className="editor-markdown-preview"
-          dangerouslySetInnerHTML={{ __html: markdownToHtml(markdown) }}
-        />
-      ) : (
-        <p style={emptyPreviewStyle}>
-          Preview your article here. Use the toolbar to insert markdown syntax.
-        </p>
-      )}
-      <style jsx>{`
-        .editor-markdown-preview {
-          color: var(--text-secondary);
-          line-height: 1.75;
-          overflow-wrap: anywhere;
+      <MarkdownContent
+        markdown={markdown}
+        className="editor-markdown-preview"
+        emptyFallback={
+          <p style={emptyPreviewStyle}>
+            Preview your article here. Use the toolbar to insert markdown syntax.
+          </p>
         }
-
-        .editor-markdown-preview h1,
-        .editor-markdown-preview h2,
-        .editor-markdown-preview h3,
-        .editor-markdown-preview h4,
-        .editor-markdown-preview h5,
-        .editor-markdown-preview h6 {
-          color: var(--text-primary);
-          line-height: 1.2;
-          margin: 1.2em 0 0.6em;
-        }
-
-        .editor-markdown-preview h1 {
-          font-size: 28px;
-        }
-
-        .editor-markdown-preview h2 {
-          font-size: 24px;
-        }
-
-        .editor-markdown-preview h3 {
-          font-size: 20px;
-        }
-
-        .editor-markdown-preview p,
-        .editor-markdown-preview ul,
-        .editor-markdown-preview ol,
-        .editor-markdown-preview blockquote,
-        .editor-markdown-preview pre {
-          margin: 0 0 1em;
-        }
-
-        .editor-markdown-preview ul,
-        .editor-markdown-preview ol {
-          padding-left: 1.25rem;
-        }
-
-        .editor-markdown-preview li {
-          margin: 0.35em 0;
-        }
-
-        .editor-markdown-preview strong {
-          color: var(--text-primary);
-        }
-
-        .editor-markdown-preview blockquote {
-          border-left: 3px solid var(--border);
-          padding-left: 1rem;
-          color: var(--text-muted);
-        }
-
-        .editor-markdown-preview code {
-          font-family: var(--font-mono);
-          font-size: 0.95em;
-          background: rgba(255, 255, 255, 0.05);
-          padding: 0.08em 0.35em;
-          border-radius: 4px;
-        }
-
-        .editor-markdown-preview pre {
-          overflow-x: auto;
-          background: #0a0a0a;
-          border: 1px solid var(--border);
-          border-radius: 8px;
-          padding: 14px;
-        }
-
-        .editor-markdown-preview pre code {
-          background: transparent;
-          padding: 0;
-        }
-
-        .editor-markdown-preview a {
-          color: var(--accent);
-          text-decoration: underline;
-          text-underline-offset: 2px;
-        }
-
-        .editor-markdown-preview img {
-          display: block;
-          max-width: 100%;
-          height: auto;
-          margin: 1.1rem 0;
-          border-radius: 10px;
-          border: 1px solid var(--border);
-        }
-
-        @media (max-width: 640px) {
-          .editor-markdown-preview h1 {
-            font-size: 24px;
-          }
-
-          .editor-markdown-preview h2 {
-            font-size: 21px;
-          }
-
-          .editor-markdown-preview h3 {
-            font-size: 18px;
-          }
-        }
-      `}</style>
+      />
     </div>
   );
 }

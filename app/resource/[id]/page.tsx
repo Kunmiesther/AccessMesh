@@ -4,11 +4,8 @@
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { MarkdownContent } from "@/components/MarkdownContent";
 import { Navbar } from "@/components/Navbar";
-import {
-  looksLikeMarkdownContent as detectMarkdownContent,
-  markdownToHtml as renderMarkdownToHtml,
-} from "@/lib/markdown";
 import { getProtectedResource } from "@/lib/api";
 import {
   appResourceUrl,
@@ -262,144 +259,14 @@ function UnlockedContent({ resource }: { resource: ResourceDetail }) {
 
 function ArticleContent({ resource }: { resource: ResourceDetail }) {
   const markdown = getMarkdownContent(resource);
-  const isMarkdown = detectMarkdownContent(markdown);
 
   return (
     <div style={{ marginTop: 16, maxWidth: "72ch" }}>
-      {isMarkdown ? (
-        <div
-          id={`article-${resource.id}`}
-          className="resource-markdown"
-          dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(markdown) }}
-        />
-      ) : (
-        <div id={`article-${resource.id}`} className="resource-plain-text">
-          {markdown}
-        </div>
-      )}
-      <style jsx>{`
-        .resource-markdown {
-          color: var(--text-secondary);
-          line-height: 1.75;
-          overflow-wrap: anywhere;
-        }
-
-        .resource-plain-text {
-          color: var(--text-secondary);
-          line-height: 1.75;
-          white-space: pre-wrap;
-          overflow-wrap: anywhere;
-        }
-
-        .resource-markdown h1,
-        .resource-markdown h2,
-        .resource-markdown h3,
-        .resource-markdown h4,
-        .resource-markdown h5,
-        .resource-markdown h6 {
-          color: var(--text-primary);
-          line-height: 1.25;
-          margin: 1.25em 0 0.6em;
-        }
-
-        .resource-markdown h1 {
-          font-size: 28px;
-        }
-
-        .resource-markdown h2 {
-          font-size: 22px;
-        }
-
-        .resource-markdown h3 {
-          font-size: 18px;
-        }
-
-        .resource-markdown p,
-        .resource-markdown ul,
-        .resource-markdown ol,
-        .resource-markdown blockquote,
-        .resource-markdown pre {
-          margin: 0 0 1em;
-        }
-
-        .resource-markdown p,
-        .resource-markdown ul,
-        .resource-markdown ol,
-        .resource-markdown li,
-        .resource-markdown blockquote {
-          white-space: pre-wrap;
-          overflow-wrap: anywhere;
-        }
-
-        .resource-markdown ul,
-        .resource-markdown ol {
-          padding-left: 1.25rem;
-        }
-
-        .resource-markdown li {
-          margin: 0.35em 0;
-        }
-
-        .resource-markdown blockquote {
-          border-left: 3px solid var(--border);
-          padding-left: 1rem;
-          color: var(--text-muted);
-        }
-
-        .resource-markdown strong {
-          color: var(--text-primary);
-        }
-
-        .resource-markdown code {
-          font-family: var(--font-mono);
-          font-size: 0.95em;
-          background: rgba(255, 255, 255, 0.05);
-          padding: 0.08em 0.35em;
-          border-radius: 4px;
-        }
-
-        .resource-markdown pre {
-          overflow-x: auto;
-          background: #0a0a0a;
-          border: 1px solid var(--border);
-          border-radius: 8px;
-          padding: 14px;
-        }
-
-        .resource-markdown pre code {
-          background: transparent;
-          padding: 0;
-        }
-
-        .resource-markdown a {
-          color: var(--accent);
-          text-decoration: underline;
-          text-underline-offset: 2px;
-        }
-
-        .resource-markdown img {
-          display: block;
-          max-width: 100%;
-          height: auto;
-          margin: 1.1rem 0;
-          border-radius: 10px;
-          border: 1px solid var(--border);
-        }
-
-        @media (max-width: 640px) {
-          .resource-markdown h1 {
-            font-size: 24px;
-          }
-
-          .resource-markdown h2 {
-            font-size: 20px;
-          }
-
-          .resource-markdown h3 {
-            font-size: 17px;
-          }
-        }
-      `}</style>
+      <MarkdownContent
+        markdown={markdown}
+        className="resource-markdown"
+        emptyFallback={<div id={`article-${resource.id}`} />}
+      />
     </div>
   );
 }
@@ -547,13 +414,6 @@ function getMarkdownContent(resource: ResourceDetail) {
   return url.startsWith("data:") ? decodeDataUrl(url) : "";
 }
 
-function looksLikeMarkdownContent(content: string) {
-  return /(^|\n)\s{0,3}(#{1,6}\s|>\s|[-*]\s|\d+\.\s|```)/m.test(content) ||
-    /\*\*[^*\n]+\*\*/.test(content) ||
-    /`[^`\n]+`/.test(content) ||
-    /\[[^\]\n]+\]\((https?:\/\/[^\s)]+)\)/.test(content);
-}
-
 function parseFileAsset(resource: ResourceDetail) {
   const candidates = [resource.resourceContent, resource.resourceUrl, resource.endpoint];
 
@@ -627,116 +487,6 @@ function decodeDataUrl(value: string) {
   }
 }
 
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
-function formatInlineMarkdown(value: string) {
-  const escaped = escapeHtml(value);
-
-  return escaped
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, "$1<em>$2</em>");
-}
-
-function markdownToHtml(markdown: string) {
-  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
-  const html: string[] = [];
-  let paragraph: string[] = [];
-  let listOpen = false;
-  let codeOpen = false;
-  let codeLines: string[] = [];
-
-  const flushParagraph = () => {
-    if (paragraph.length > 0) {
-      html.push(`<p>${paragraph.map(formatInlineMarkdown).join(" ")}</p>`);
-      paragraph = [];
-    }
-  };
-
-  const closeList = () => {
-    if (listOpen) {
-      html.push("</ul>");
-      listOpen = false;
-    }
-  };
-
-  const closeCode = () => {
-    if (codeOpen) {
-      html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
-      codeOpen = false;
-      codeLines = [];
-    }
-  };
-
-  for (const rawLine of lines) {
-    const line = rawLine.trimEnd();
-
-    if (line.startsWith("```")) {
-      flushParagraph();
-      closeList();
-      if (codeOpen) {
-        closeCode();
-      } else {
-        codeOpen = true;
-      }
-      continue;
-    }
-
-    if (codeOpen) {
-      codeLines.push(rawLine);
-      continue;
-    }
-
-    if (!line.trim()) {
-      flushParagraph();
-      closeList();
-      continue;
-    }
-
-    const headingMatch = line.match(/^(#{1,3})\s+(.*)$/);
-    if (headingMatch) {
-      flushParagraph();
-      closeList();
-      const level = headingMatch[1].length;
-      html.push(`<h${level}>${formatInlineMarkdown(headingMatch[2])}</h${level}>`);
-      continue;
-    }
-
-    const quoteMatch = line.match(/^>\s+(.*)$/);
-    if (quoteMatch) {
-      flushParagraph();
-      closeList();
-      html.push(`<blockquote>${formatInlineMarkdown(quoteMatch[1])}</blockquote>`);
-      continue;
-    }
-
-    const listMatch = line.match(/^[-*]\s+(.*)$/);
-    if (listMatch) {
-      flushParagraph();
-      if (!listOpen) {
-        html.push("<ul>");
-        listOpen = true;
-      }
-      html.push(`<li>${formatInlineMarkdown(listMatch[1])}</li>`);
-      continue;
-    }
-
-    paragraph.push(line);
-  }
-
-  flushParagraph();
-  closeList();
-  closeCode();
-
-  return html.join("");
-}
 
 const backLinkStyle = {
   display: "inline-block",
