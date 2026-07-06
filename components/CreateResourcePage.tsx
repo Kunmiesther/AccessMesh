@@ -56,6 +56,8 @@ type MarkdownInsertionResult = {
 };
 
 const PUBLISH_PAYMENT_CONFIRMATION_TIMEOUT_MS = 300_000;
+const PUBLISH_CONFIRMATION_FAILURE_MESSAGE =
+  "Payment was submitted but could not be confirmed. Please wait a moment and check your wallet/activity before retrying.";
 
 export function CreateResourcePage() {
   const router = useRouter();
@@ -78,6 +80,7 @@ export function CreateResourcePage() {
   const [coverImageFile, setCoverImageFile] = useState<File | null>(null);
   const [tags, setTags] = useState("");
   const articleTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const publishConfirmationInFlightRef = useRef(false);
 
   useEffect(() => {
     if (ready && !connected) {
@@ -161,6 +164,10 @@ export function CreateResourcePage() {
   }
 
   async function handleConfirmPublish() {
+    if (publishConfirmationInFlightRef.current) {
+      return;
+    }
+
     if (!connected || !address) {
       router.push("/wallet?next=/create");
       return;
@@ -192,6 +199,7 @@ export function CreateResourcePage() {
     }
 
     try {
+      publishConfirmationInFlightRef.current = true;
       setState({ status: "paying" });
       console.info("STEP 2 Preparing payment");
       const confirmation = await executePublishFeePayment({
@@ -220,6 +228,8 @@ export function CreateResourcePage() {
         status: "error",
         message: getPublishErrorMessage(error),
       });
+    } finally {
+      publishConfirmationInFlightRef.current = false;
     }
   }
 
@@ -892,8 +902,11 @@ const markdownToolbarItems = [
 
 function getPublishErrorMessage(error: unknown) {
   if (error instanceof Error) {
-    if (/timed out while waiting for user operation/i.test(error.message)) {
-      return "Transaction is taking longer than expected.";
+    if (
+      /could not be confirmed/i.test(error.message) ||
+      /timed out while waiting for user operation/i.test(error.message)
+    ) {
+      return PUBLISH_CONFIRMATION_FAILURE_MESSAGE;
     }
 
     return error.message;
