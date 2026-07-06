@@ -1,5 +1,7 @@
 export type ResourceType = "API" | "CONTENT" | "TOOL" | "DATASET";
 export type PublishedResourceType = "ARTICLE" | "FILE_UPLOAD" | "EXTERNAL_LINK";
+export type UnlockAdvisorRecommendation = "BUY" | "CONSIDER" | "SKIP";
+export type UnlockAdvisorDifficulty = "Beginner" | "Intermediate" | "Advanced";
 
 export type ActivityEventType =
   | "RESOURCE_PUBLISHED"
@@ -24,6 +26,7 @@ export type ResourceMeta = {
   resourceType: PublishedResourceType | null;
   resourceContent?: string;
   priceUSDC: number;
+  previewText?: string | null;
   resourceUrl?: string;
   endpoint?: string;
   coverImage?: string | null;
@@ -248,6 +251,37 @@ export type X402AccessRequired = {
   unlockUrl: string;
 };
 
+export type PaymentRequiredMetadata = {
+  url: string;
+  price: string;
+  currency: "USDC";
+  network: "Arc Testnet";
+};
+
+export type PaymentRequiredResourceMetadata = {
+  title?: string;
+  summary?: string;
+  creator?: string;
+  category?: string;
+  topics?: string[];
+  difficulty?: string;
+  estimatedAudience?: string;
+  qualityScore?: string;
+  agentReasoningHint?: string;
+};
+
+export type PaymentRequiredAgentMetadata = {
+  decisionContext: string;
+  retryAfterPayment: boolean;
+};
+
+export type PaymentRequiredRetryMetadata = {
+  method: "GET";
+  headers?: {
+    "x-accessmesh-wallet": string;
+  };
+};
+
 export type ProtectedResourceResponse =
   | {
       ok: true;
@@ -260,10 +294,35 @@ export type ProtectedResourceResponse =
         message: string;
         details?: Record<string, unknown>;
       };
-      resource: ResourceDetail;
+      resource: ResourceDetail & PaymentRequiredResourceMetadata;
       accepts: X402Accept[];
       x402: X402PaymentRequired;
       accessRequired: X402AccessRequired;
+      payment?: PaymentRequiredMetadata;
+      agent?: PaymentRequiredAgentMetadata;
+      retry?: PaymentRequiredRetryMetadata;
+    };
+
+export type UnlockAdvisorResult = {
+  recommendation: UnlockAdvisorRecommendation;
+  confidence: number;
+  valueScore: number;
+  difficulty: UnlockAdvisorDifficulty;
+  bestFor: string[];
+  reason: string;
+  possibleOverlap: string;
+  priceAssessment: string;
+  agentDecisionSummary: string;
+};
+
+export type UnlockAdvisorResponse =
+  | {
+      ok: true;
+      advisor: UnlockAdvisorResult;
+    }
+  | {
+      ok: false;
+      message: string;
     };
 
 export type RecentActivityEntry = {

@@ -59,6 +59,7 @@ export class InputError extends Error {
 export function getWalletFromRequest(request: Request) {
   const url = new URL(request.url);
   return (
+    request.headers.get("x-accessmesh-wallet") ??
     request.headers.get("x-wallet-address") ??
     request.headers.get("x-payer-wallet") ??
     url.searchParams.get("wallet")

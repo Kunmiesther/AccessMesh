@@ -7,6 +7,7 @@ export async function middleware(request: NextRequest) {
 
   const resourceId = request.nextUrl.pathname.split("/").pop();
   const wallet =
+    request.headers.get("x-accessmesh-wallet") ??
     request.headers.get("x-wallet-address") ??
     request.headers.get("x-payer-wallet") ??
     request.nextUrl.searchParams.get("wallet");

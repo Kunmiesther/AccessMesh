@@ -4,6 +4,12 @@ import { jsonError } from "@/lib/http";
 import { InputError, normalizeAddress } from "@/lib/validation";
 import { logAccessDenied, logRequestAttempted } from "@/services/ledgerService";
 import { getResourceProviderWallet, validateAccess } from "@/services/resourceService";
+import {
+  buildPaymentMetadata,
+  buildPaymentRequiredAgentMetadata,
+  buildPaymentRequiredResourceMetadata,
+  buildPaymentRequiredRetryMetadata,
+} from "@/services/x402AccessService";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,12 +35,23 @@ export async function POST(request: Request) {
     if (!access.allowed) {
       const { resource, providerWallet } =
         await getResourceProviderWallet(resourceId);
+      const payment = buildPaymentMetadata({
+        resourceId,
+        priceUSDC: resource.priceUSDC,
+      });
 
       await logAccessDenied({ resourceId, payerWallet: wallet });
 
       return NextResponse.json(
         {
           ok: false,
+          error: "Payment required",
+          code: "ACCESSMESH_PAYMENT_REQUIRED",
+          resourceId,
+          payment,
+          resource: buildPaymentRequiredResourceMetadata(resource),
+          agent: buildPaymentRequiredAgentMetadata(),
+          retry: buildPaymentRequiredRetryMetadata(wallet),
           allowed: false,
           paymentRequired: {
             resourceId,

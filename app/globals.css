@@ -157,6 +157,15 @@ textarea {
   font-family: var(--font-mono);
 }
 
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
 @media (max-width: 900px) {
   .page-main {
     padding: 32px 20px 72px;

@@ -3,6 +3,12 @@ import { jsonError } from "@/lib/http";
 import { getWalletFromRequest, InputError } from "@/lib/validation";
 import { recordActivity, ActivityType } from "@/services/activityService";
 import { resolveProtectedResourceAccess } from "@/services/protectedResourceService";
+import {
+  buildPaymentMetadata,
+  buildPaymentRequiredAgentMetadata,
+  buildPaymentRequiredResourceMetadata,
+  buildPaymentRequiredRetryMetadata,
+} from "@/services/x402AccessService";
 
 export async function handleProtectedResourceGET(
   request: Request,
@@ -17,15 +23,23 @@ export async function handleProtectedResourceGET(
     });
 
     if (access.status === 402) {
+      const payment = buildPaymentMetadata({
+        resourceId: id,
+        priceUSDC: access.resource.priceUSDC,
+      });
+      const resourceMetadata = buildPaymentRequiredResourceMetadata(access.resource);
+
       return NextResponse.json(
         {
           ok: false,
           error: {
-            code: "PAYMENT_REQUIRED",
-            message:
-              "A settled AccessMesh Arc USDC unlock is required before x402 content access.",
+            code: "ACCESSMESH_PAYMENT_REQUIRED",
+            message: "Payment required",
           },
-          resource: access.resource,
+          resource: {
+            ...access.resource,
+            ...resourceMetadata,
+          },
           accepts: access.paymentRequired.accepts,
           x402: access.paymentRequired,
           accessRequired: {
@@ -33,6 +47,9 @@ export async function handleProtectedResourceGET(
             wallet: access.wallet,
             unlockUrl: access.paymentRequired.unlockUrl,
           },
+          payment,
+          agent: buildPaymentRequiredAgentMetadata(),
+          retry: buildPaymentRequiredRetryMetadata(access.wallet),
         },
         {
           status: 402,

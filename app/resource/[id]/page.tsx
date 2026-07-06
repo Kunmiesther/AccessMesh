@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { AIUnlockAdvisor } from "@/components/AIUnlockAdvisor";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { Navbar } from "@/components/Navbar";
 import { getProtectedResource } from "@/lib/api";
@@ -103,6 +104,8 @@ export default function ResourceDetailPage() {
               <UnlockedContent resource={resource} />
             ) : (
               <LockedContent
+                resource={resource}
+                walletAddress={address}
                 onUnlock={() => {
                   if (!ready) {
                     return;
@@ -212,8 +215,12 @@ function PublishedSuccessPanel({ resource }: { resource: ResourceDetail }) {
 }
 
 function LockedContent({
+  resource,
+  walletAddress,
   onUnlock,
 }: {
+  resource: ResourceDetail;
+  walletAddress?: string | null;
   onUnlock: () => void;
 }) {
   return (
@@ -227,6 +234,12 @@ function LockedContent({
         <div style={{ height: 10, width: "82%", background: "var(--border)" }} />
         <div style={{ height: 10, width: "64%", background: "var(--border)" }} />
         <div style={{ height: 10, width: "74%", background: "var(--border)" }} />
+      </div>
+      <div style={{ marginTop: 18 }}>
+        <AIUnlockAdvisor
+          resourceId={resource.id}
+          walletAddress={walletAddress}
+        />
       </div>
       <button
         type="button"

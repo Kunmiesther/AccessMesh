@@ -2,6 +2,12 @@ import type { Resource } from "@prisma/client";
 import { ArcTestnet } from "@circle-fin/app-kit/chains";
 import { prisma } from "@/lib/prisma";
 import { UNKNOWN_WALLET } from "@/lib/validation";
+import type {
+  PaymentRequiredAgentMetadata,
+  PaymentRequiredMetadata,
+  PaymentRequiredResourceMetadata,
+  PaymentRequiredRetryMetadata,
+} from "@/types";
 
 export const X402AccessResult = {
   Success: "SUCCESS",
@@ -52,6 +58,71 @@ export function buildX402AccessRequired(params: {
   };
 }
 
+type AccessMetadataResource = {
+  id: string;
+  title?: string | null;
+  name: string;
+  description: string;
+  priceUSDC: number;
+  category?: string;
+  resourceCategory?: string | null;
+  creatorWallet: string;
+  creatorDisplayName?: string | null;
+  tags?: string | string[];
+};
+
+export function buildPaymentMetadata(params: {
+  resourceId: string;
+  priceUSDC: number;
+}) {
+  return {
+    url: `/access/${params.resourceId}`,
+    price: params.priceUSDC.toFixed(2),
+    currency: "USDC",
+    network: "Arc Testnet",
+  } satisfies PaymentRequiredMetadata;
+}
+
+export function buildPaymentRequiredResourceMetadata(
+  resource: AccessMetadataResource,
+) {
+  const category =
+    normalizeOptionalText(resource.resourceCategory) ??
+    normalizeOptionalText(resource.category);
+  const topics = normalizeTopics(resource.tags);
+  const creator =
+    normalizeOptionalText(resource.creatorDisplayName) ?? resource.creatorWallet;
+
+  return {
+    title: normalizeOptionalText(resource.title) ?? resource.name,
+    summary: resource.description,
+    creator,
+    ...(category ? { category } : {}),
+    ...(topics.length > 0 ? { topics } : {}),
+  } satisfies PaymentRequiredResourceMetadata;
+}
+
+export function buildPaymentRequiredAgentMetadata() {
+  return {
+    decisionContext:
+      "This response gives an automated client enough context to decide whether the protected resource is worth purchasing for its current task.",
+    retryAfterPayment: true,
+  } satisfies PaymentRequiredAgentMetadata;
+}
+
+export function buildPaymentRequiredRetryMetadata(wallet?: string | null) {
+  return {
+    method: "GET",
+    ...(wallet
+      ? {
+          headers: {
+            "x-accessmesh-wallet": wallet,
+          },
+        }
+      : {}),
+  } satisfies PaymentRequiredRetryMetadata;
+}
+
 export async function getX402Analytics(params?: { creatorWallet?: string }) {
   const where = params?.creatorWallet
     ? { resource: { creatorWallet: params.creatorWallet } }
@@ -75,4 +146,34 @@ export async function getX402Analytics(params?: { creatorWallet?: string }) {
     conversionRate:
       protectedRequests > 0 ? successfulAccesses / protectedRequests : 0,
   };
+}
+
+function normalizeOptionalText(value: string | null | undefined) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeTopics(value: string | string[] | undefined) {
+  if (Array.isArray(value)) {
+    return value.filter((topic): topic is string => typeof topic === "string");
+  }
+
+  if (typeof value !== "string") {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((topic): topic is string => typeof topic === "string");
+    }
+  } catch {
+    return [];
+  }
+
+  return [];
 }

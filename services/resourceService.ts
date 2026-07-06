@@ -275,6 +275,7 @@ export async function getResourcePaymentParticipants(resourceId: string) {
 export function serializeResource(resource: ResourceRecord): ResourceMeta {
   const type = normalizeStoredResourceType(resource.type || resource.category);
   const resourceType = normalizeStoredPublishedResourceType(resource.resourceType);
+  const previewText = buildPreviewText(resource);
 
   return {
     id: resource.id,
@@ -288,6 +289,7 @@ export function serializeResource(resource: ResourceRecord): ResourceMeta {
     resourceCategory: normalizeOptionalStoredText(resource.resourceCategory) ?? "",
     resourceType,
     priceUSDC: resource.priceUSDC,
+    previewText,
     coverImage: resource.coverImage,
     tags: parseStoredTags(resource.tags),
     unlockCount: resource.unlockCount,
@@ -450,6 +452,61 @@ function parseStoredTags(value: string) {
   return [];
 }
 
+function buildPreviewText(resource: ResourceRecord) {
+  const resourceType =
+    normalizeStoredPublishedResourceType(resource.resourceType) ??
+    inferStoredPublishedResourceType(resource);
+  if (resourceType !== "ARTICLE") {
+    return null;
+  }
+
+  const rawContent =
+    normalizeOptionalStoredText(resource.resourceContent) ??
+    decodeDataUrl(
+      normalizeOptionalStoredText(resource.resourceUrl || resource.endpoint) ?? "",
+    );
+
+  if (!rawContent) {
+    return null;
+  }
+
+  const normalized = stripMarkdown(rawContent)
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (normalized.length === 0) {
+    return null;
+  }
+
+  return normalized.length > 320
+    ? `${normalized.slice(0, 317).trimEnd()}...`
+    : normalized;
+}
+
+function inferStoredPublishedResourceType(resource: ResourceRecord) {
+  const resourceUrl = normalizeOptionalStoredText(resource.resourceUrl || resource.endpoint) ?? "";
+  const resourceContent = normalizeOptionalStoredText(resource.resourceContent) ?? "";
+
+  if (resourceUrl.startsWith("data:text/markdown") || resourceContent.length > 0) {
+    try {
+      const parsed = JSON.parse(resourceContent);
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        typeof (parsed as { fileDataUrl?: unknown }).fileDataUrl === "string"
+      ) {
+        return "FILE_UPLOAD" as const;
+      }
+    } catch {
+      return "ARTICLE" as const;
+    }
+
+    return "ARTICLE" as const;
+  }
+
+  return "EXTERNAL_LINK" as const;
+}
+
 function normalizeOptionalStoredText(value: string | null | undefined) {
   if (typeof value !== "string") {
     return undefined;
@@ -502,4 +559,35 @@ function validateFileUpload(
 
 function toDataUrl(mimeType: string, content: string) {
   return `data:${mimeType},${encodeURIComponent(content)}`;
+}
+
+function decodeDataUrl(value: string) {
+  const commaIndex = value.indexOf(",");
+  if (!value.startsWith("data:") || commaIndex === -1) {
+    return value;
+  }
+
+  const meta = value.slice(5, commaIndex);
+  const payload = value.slice(commaIndex + 1);
+
+  if (meta.includes(";base64")) {
+    return Buffer.from(payload, "base64").toString("utf8");
+  }
+
+  try {
+    return decodeURIComponent(payload);
+  } catch {
+    return payload;
+  }
+}
+
+function stripMarkdown(value: string) {
+  return value
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^>\s?/gm, "")
+    .replace(/[*_~]/g, "");
 }
