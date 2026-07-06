@@ -8,12 +8,18 @@ import {
   type Hash,
 } from "viem";
 import { WaitForUserOperationReceiptTimeoutError } from "viem/account-abstraction";
-import { getArcUserOperationGasFees } from "@/lib/arc-gas";
 import type { ModularWalletSession } from "@/lib/modular-wallet";
 
 const PUBLISH_LOOKUP_TIMEOUT_MS = 15_000;
 const PUBLISH_CONFIRMATION_ERROR_MESSAGE =
   "Payment was submitted but could not be confirmed. Please wait a moment and check your wallet/activity before retrying.";
+
+type PublishBundlerClient = NonNullable<ModularWalletSession["bundlerClient"]>;
+type PublishCall = {
+  to: Address;
+  data: `0x${string}`;
+  value: bigint;
+};
 
 export function assertPublishEnvironment() {
   if (!process.env.NEXT_PUBLIC_CLIENT_KEY) {
@@ -26,7 +32,7 @@ export function assertPublishEnvironment() {
 }
 
 export async function executePublishFeePayment(params: {
-  bundlerClient: NonNullable<ModularWalletSession["bundlerClient"]>;
+  bundlerClient: PublishBundlerClient;
   wallet: Address;
   treasuryWallet: Address;
   publishFeeUSDC: number;
@@ -56,7 +62,7 @@ export async function executePublishFeePayment(params: {
     throw new Error(`Publishing must run on Arc. Active chain id: ${activeChainId}.`);
   }
 
-  const call = {
+  const call: PublishCall = {
     to: ArcTestnet.usdcAddress as Address,
     data: encodeFunctionData({
       abi: erc20Abi,
@@ -66,15 +72,21 @@ export async function executePublishFeePayment(params: {
     value: BigInt(0),
   };
 
-  console.info("STEP 3 Building user operation");
-  const gasFees = await getArcUserOperationGasFees(params.bundlerClient.client);
-
   const request = {
     account,
     calls: [call],
-    maxFeePerGas: gasFees.maxFeePerGas,
-    maxPriorityFeePerGas: gasFees.maxPriorityFeePerGas,
   };
+
+  console.info("STEP 3 Building user operation");
+  console.info(
+    "[publish] user operation request",
+    summarizePublishUserOperationRequest({
+      request,
+      chainId: activeChainId,
+      accountAddress: account.address,
+      calls: [call],
+    }),
+  );
 
   let userOpHash: Hash;
 
@@ -83,17 +95,24 @@ export async function executePublishFeePayment(params: {
     userOpHash = await params.bundlerClient.sendUserOperation(request);
     console.info("STEP 5 User operation hash received", userOpHash);
   } catch (error) {
-    console.error("[publish] sendUserOperation request", summarizePublishUserOperationRequest(request, activeChainId));
+    console.error(
+      "[publish] sendUserOperation request",
+      summarizePublishUserOperationRequest({
+        request,
+        chainId: activeChainId,
+        accountAddress: account.address,
+        calls: [call],
+      }),
+    );
     throw error;
   }
 
-  console.info("STEP 6 Waiting for confirmation");
   const confirmation = await waitForPublishConfirmation({
     bundlerClient: params.bundlerClient,
     userOpHash,
     timeoutMs: params.timeoutMs,
   });
-  console.info("STEP 7 Confirmed", confirmation.transactionHash);
+  console.info("STEP 7 Payment confirmed", confirmation.transactionHash);
 
   return {
     userOpHash,
@@ -102,31 +121,31 @@ export async function executePublishFeePayment(params: {
 }
 
 async function waitForPublishConfirmation(params: {
-  bundlerClient: NonNullable<ModularWalletSession["bundlerClient"]>;
+  bundlerClient: PublishBundlerClient;
   userOpHash: Hash;
   timeoutMs?: number;
 }): Promise<{ transactionHash: Hash }> {
+  const timeoutMs = params.timeoutMs ?? 300_000;
+
+  console.info("STEP 6 Waiting for confirmation");
+
   try {
-    const receipt = await params.bundlerClient.waitForUserOperationReceipt({
-      hash: params.userOpHash,
-      timeout: params.timeoutMs,
-    });
-    const transactionHash = readReceiptTransactionHash(receipt);
-    const blockNumber = readReceiptBlockNumber(receipt);
+    const receipt = await withTimeout(
+      params.bundlerClient.waitForUserOperationReceipt({
+        hash: params.userOpHash,
+        timeout: timeoutMs,
+      }),
+      timeoutMs,
+      "publish waitForUserOperationReceipt",
+    );
 
-    if (transactionHash || blockNumber) {
-      if (!transactionHash) {
-        throw new Error(PUBLISH_CONFIRMATION_ERROR_MESSAGE);
-      }
-
-      return { transactionHash };
+    if (!receipt.success) {
+      throw new Error(receipt.reason ?? "USDC payment user operation reverted.");
     }
 
-    if ("success" in receipt && receipt.success === false) {
-      throw new Error(
-        readStringValue(receipt, "reason") ?? "USDC payment user operation reverted.",
-      );
-    }
+    return {
+      transactionHash: receipt.receipt.transactionHash,
+    };
   } catch (error) {
     if (!isPublishUserOperationTimeoutError(error) && !isPublishTimeoutError(error)) {
       throw error;
@@ -143,12 +162,14 @@ async function waitForPublishConfirmation(params: {
     );
     console.info("STEP 6B fallback receipt lookup result", {
       userOpHash: params.userOpHash,
-      blockNumber: fallbackReceipt?.blockNumber ?? null,
-      transactionHash: fallbackReceipt?.transactionHash ?? null,
+      blockNumber: fallbackReceipt?.receipt?.blockNumber ?? null,
+      transactionHash: fallbackReceipt?.receipt?.transactionHash ?? null,
     });
 
-    if (fallbackReceipt?.transactionHash) {
-      return { transactionHash: fallbackReceipt.transactionHash };
+    if (fallbackReceipt?.receipt?.transactionHash) {
+      return {
+        transactionHash: fallbackReceipt.receipt.transactionHash,
+      };
     }
 
     const fallbackOperation = await tryGetPublishUserOperation(
@@ -162,173 +183,61 @@ async function waitForPublishConfirmation(params: {
     });
 
     if (fallbackOperation?.transactionHash) {
-      return { transactionHash: fallbackOperation.transactionHash };
-    }
-
-    if (fallbackReceipt?.blockNumber || fallbackOperation?.blockNumber) {
-      throw new Error(PUBLISH_CONFIRMATION_ERROR_MESSAGE);
+      return {
+        transactionHash: fallbackOperation.transactionHash,
+      };
     }
 
     throw new Error(PUBLISH_CONFIRMATION_ERROR_MESSAGE);
   }
-
-  throw new Error(PUBLISH_CONFIRMATION_ERROR_MESSAGE);
 }
 
 async function tryGetPublishUserOperationReceipt(
-  bundlerClient: NonNullable<ModularWalletSession["bundlerClient"]>,
+  bundlerClient: PublishBundlerClient,
   userOpHash: Hash,
 ) {
   try {
     const receipt = await withTimeout(
-      requestPublishUserOperationReceipt(bundlerClient, userOpHash),
+      bundlerClient.getUserOperationReceipt({ hash: userOpHash }),
       PUBLISH_LOOKUP_TIMEOUT_MS,
       "publish getUserOperationReceipt",
     );
-    const transactionHash = readReceiptTransactionHash(receipt);
-    const blockNumber = readReceiptBlockNumber(receipt);
 
-    if (!transactionHash && !blockNumber) {
+    if (
+      receipt?.receipt?.blockNumber == null ||
+      receipt.receipt.transactionHash == null
+    ) {
       return null;
     }
 
-    return {
-      transactionHash,
-      blockNumber,
-    };
+    return receipt;
   } catch {
     return null;
   }
 }
 
 async function tryGetPublishUserOperation(
-  bundlerClient: NonNullable<ModularWalletSession["bundlerClient"]>,
+  bundlerClient: PublishBundlerClient,
   userOpHash: Hash,
 ) {
   try {
     const userOperation = await withTimeout(
-      requestPublishUserOperation(bundlerClient, userOpHash),
+      bundlerClient.getUserOperation({ hash: userOpHash }),
       PUBLISH_LOOKUP_TIMEOUT_MS,
       "publish getUserOperation",
     );
-    const transactionHash = readHashValue(
-      userOperation,
-      "transactionHash",
-      "receipt.transactionHash",
-    );
-    const blockNumber = readStringValue(userOperation, "blockNumber", "receipt.blockNumber");
 
-    if (!transactionHash && !blockNumber) {
+    if (
+      userOperation?.blockNumber == null ||
+      userOperation.transactionHash == null
+    ) {
       return null;
     }
 
-    return {
-      transactionHash,
-      blockNumber,
-    };
+    return userOperation;
   } catch {
     return null;
   }
-}
-
-async function requestPublishUserOperationReceipt(
-  bundlerClient: NonNullable<ModularWalletSession["bundlerClient"]>,
-  userOpHash: Hash,
-) {
-  const getUserOperationReceipt = (
-    bundlerClient as NonNullable<ModularWalletSession["bundlerClient"]> & {
-      getUserOperationReceipt?: (args: { hash: Hash }) => Promise<unknown>;
-    }
-  ).getUserOperationReceipt;
-
-  if (typeof getUserOperationReceipt === "function") {
-    return getUserOperationReceipt.call(bundlerClient, { hash: userOpHash });
-  }
-
-  const request = (
-    bundlerClient as NonNullable<ModularWalletSession["bundlerClient"]> & {
-      request?: (args: { method: string; params: Array<Hash> }) => Promise<unknown>;
-    }
-  ).request;
-
-  if (typeof request !== "function") {
-    return null;
-  }
-
-  return request.call(bundlerClient, {
-    method: "eth_getUserOperationReceipt",
-    params: [userOpHash],
-  });
-}
-
-async function requestPublishUserOperation(
-  bundlerClient: NonNullable<ModularWalletSession["bundlerClient"]>,
-  userOpHash: Hash,
-) {
-  const getUserOperation = (
-    bundlerClient as NonNullable<ModularWalletSession["bundlerClient"]> & {
-      getUserOperation?: (args: { hash: Hash }) => Promise<unknown>;
-    }
-  ).getUserOperation;
-
-  if (typeof getUserOperation === "function") {
-    return getUserOperation.call(bundlerClient, { hash: userOpHash });
-  }
-
-  const request = (
-    bundlerClient as NonNullable<ModularWalletSession["bundlerClient"]> & {
-      request?: (args: { method: string; params: Array<Hash> }) => Promise<unknown>;
-    }
-  ).request;
-
-  if (typeof request !== "function") {
-    return null;
-  }
-
-  return request.call(bundlerClient, {
-    method: "eth_getUserOperationByHash",
-    params: [userOpHash],
-  });
-}
-
-function readReceiptTransactionHash(value: unknown) {
-  return readHashValue(value, "receipt.transactionHash", "transactionHash");
-}
-
-function readReceiptBlockNumber(value: unknown) {
-  return readStringValue(value, "receipt.blockNumber", "blockNumber");
-}
-
-function readHashValue(value: unknown, ...paths: string[]) {
-  for (const path of paths) {
-    const candidate = readNestedValue(value, path);
-    if (typeof candidate === "string" && candidate.startsWith("0x")) {
-      return candidate as Hash;
-    }
-  }
-
-  return null;
-}
-
-function readStringValue(value: unknown, ...paths: string[]) {
-  for (const path of paths) {
-    const candidate = readNestedValue(value, path);
-    if (typeof candidate === "string" && candidate.length > 0) {
-      return candidate;
-    }
-  }
-
-  return null;
-}
-
-function readNestedValue(value: unknown, path: string) {
-  return path.split(".").reduce<unknown>((current, key) => {
-    if (!current || typeof current !== "object" || !(key in current)) {
-      return undefined;
-    }
-
-    return (current as Record<string, unknown>)[key];
-  }, value);
 }
 
 function isPublishUserOperationTimeoutError(error: unknown) {
@@ -365,34 +274,50 @@ async function withTimeout<T>(
   }
 }
 
-function summarizePublishUserOperationRequest(
+function summarizePublishUserOperationRequest(params: {
   request: {
-    account: NonNullable<ModularWalletSession["bundlerClient"]>["account"];
-    calls: Array<{
-      to: Address;
-      data: `0x${string}`;
-      value: bigint;
-    }>;
-  },
-  chainId: number,
-) {
-  return {
-    account: request.account ? { address: request.account.address } : null,
-    chain: {
-      id: chainId,
-      name: ArcTestnet.name,
-    },
-    calls: request.calls.map((call) => ({
-      target: call.to,
-      calldataLength: Math.max((call.data.length - 2) / 2, 0),
-      value: call.value.toString(),
-      maxFeePerGas: null,
-      maxPriorityFeePerGas: null,
-      verificationGasLimit: null,
-      callGasLimit: null,
-      preVerificationGas: null,
-      paymasterVerificationGasLimit: null,
-      paymasterPostOpGasLimit: null,
-    })),
+    account: PublishBundlerClient["account"];
+    calls: PublishCall[];
+    sender?: Address;
+    callGasLimit?: bigint;
+    verificationGasLimit?: bigint;
+    preVerificationGas?: bigint;
+    maxFeePerGas?: bigint;
+    maxPriorityFeePerGas?: bigint;
+    paymaster?: Address;
+    paymasterData?: `0x${string}`;
+    paymasterVerificationGasLimit?: bigint;
+    paymasterPostOpGasLimit?: bigint;
   };
+  chainId: number;
+  accountAddress: Address;
+  calls: PublishCall[];
+}) {
+  const firstCall = params.calls[0];
+
+  return {
+    accountAddress: params.accountAddress,
+    sender: params.request.sender ?? params.accountAddress,
+    chainId: params.chainId,
+    callsCount: params.calls.length,
+    firstCallTarget: firstCall?.to ?? null,
+    firstCallCalldataLength: firstCall
+      ? Math.max((firstCall.data.length - 2) / 2, 0)
+      : null,
+    callGasLimit: stringifyBigInt(params.request.callGasLimit),
+    verificationGasLimit: stringifyBigInt(params.request.verificationGasLimit),
+    preVerificationGas: stringifyBigInt(params.request.preVerificationGas),
+    maxFeePerGas: stringifyBigInt(params.request.maxFeePerGas),
+    maxPriorityFeePerGas: stringifyBigInt(params.request.maxPriorityFeePerGas),
+    paymasterPresent: Boolean(params.request.paymaster),
+    paymasterDataPresent: Boolean(params.request.paymasterData),
+    paymasterVerificationGasLimitPresent:
+      typeof params.request.paymasterVerificationGasLimit !== "undefined",
+    paymasterPostOpGasLimitPresent:
+      typeof params.request.paymasterPostOpGasLimit !== "undefined",
+  };
+}
+
+function stringifyBigInt(value: bigint | undefined) {
+  return typeof value === "bigint" ? value.toString() : null;
 }
