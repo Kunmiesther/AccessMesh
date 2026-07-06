@@ -8,7 +8,7 @@ import { type Address } from "viem";
 import { CoverImageUpload } from "@/components/CoverImageUpload";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { Navbar } from "@/components/Navbar";
-import { getPublishFeeConfig, postResource } from "@/lib/api";
+import { ApiError, getPublishFeeConfig, postResource } from "@/lib/api";
 import { executePublishFeePayment } from "@/lib/publish-payment";
 import { useWallet } from "@/lib/ui/WalletContext";
 import type {
@@ -223,6 +223,13 @@ export function CreateResourcePage() {
       console.info("STEP 9 Resource created", response.resource.id);
       router.replace(`/resource/${response.resource.id}?published=1`);
     } catch (error) {
+      if (error instanceof ApiError) {
+        console.error("[publish] create resource API failure", {
+          status: error.status,
+          body: error.body,
+          message: error.message,
+        });
+      }
       console.error("[publish] failed", error);
       setState({
         status: "error",

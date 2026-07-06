@@ -31,12 +31,18 @@ async function apiFetch<T>(
     ...options,
   });
 
-  const data = await res.json();
+  const rawBody = await res.text();
+  const data = rawBody ? safeParseJson(rawBody) : null;
 
   if (!res.ok) {
     const message =
-      data?.error?.message ?? data?.message ?? "Request failed";
-    throw new ApiError(message, res.status, data?.error?.code);
+      (data as any)?.error?.message ?? (data as any)?.message ?? "Request failed";
+    throw new ApiError(
+      message,
+      res.status,
+      (data as any)?.error?.code,
+      data ?? rawBody,
+    );
   }
 
   return data as T;
@@ -45,11 +51,21 @@ async function apiFetch<T>(
 export class ApiError extends Error {
   status: number;
   code: string | undefined;
+  body: unknown;
 
-  constructor(message: string, status: number, code?: string) {
+  constructor(message: string, status: number, code?: string, body?: unknown) {
     super(message);
     this.status = status;
     this.code = code;
+    this.body = body;
+  }
+}
+
+function safeParseJson(rawBody: string) {
+  try {
+    return JSON.parse(rawBody) as any;
+  } catch {
+    return null;
   }
 }
 

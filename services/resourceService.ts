@@ -67,6 +67,14 @@ export async function createResource(input: CreateResourceRequest) {
     );
   }
 
+  const existingResource = await prisma.resource.findUnique({
+    where: { publishTxHash: publishFeePayment.txHash },
+  });
+
+  if (existingResource) {
+    return serializeResource(existingResource);
+  }
+
   const owner = await prisma.user.upsert({
     where: { walletAddress: creatorWallet },
     create: {

@@ -71,7 +71,7 @@ export async function POST(request: Request) {
       creatorWallet,
     });
 
-    after(async () => {
+    void after(async () => {
       await analyzeResourceIntelligence(resource.id).catch((error: unknown) => {
         console.error("AccessMesh Intelligence analysis failed", {
           resourceId: resource.id,
@@ -90,6 +90,10 @@ export async function POST(request: Request) {
     }
 
     console.error(error);
-    return jsonError(500, "RESOURCE_CREATE_FAILED", "resource could not be created");
+    return jsonError(
+      500,
+      "RESOURCE_CREATE_FAILED",
+      error instanceof Error ? error.message : "resource could not be created",
+    );
   }
 }
