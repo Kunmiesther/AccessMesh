@@ -7,6 +7,7 @@ import {
   type Address,
   type Hash,
 } from "viem";
+import { getArcUserOperationGasFees } from "@/lib/arc-gas";
 import type { ModularWalletSession } from "@/lib/modular-wallet";
 
 export function assertPublishEnvironment() {
@@ -61,10 +62,13 @@ export async function executePublishFeePayment(params: {
   };
 
   console.info("STEP 3 Building user operation");
+  const gasFees = await getArcUserOperationGasFees(params.bundlerClient.client);
 
   const request = {
     account,
     calls: [call],
+    maxFeePerGas: gasFees.maxFeePerGas,
+    maxPriorityFeePerGas: gasFees.maxPriorityFeePerGas,
   };
 
   let userOpHash: Hash;
