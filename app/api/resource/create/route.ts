@@ -1,4 +1,4 @@
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { jsonError } from "@/lib/http";
 import {
   getWalletFromRequest,
@@ -7,7 +7,6 @@ import {
   normalizeOptionalAddress,
 } from "@/lib/validation";
 import { prisma } from "@/lib/prisma";
-import { analyzeResourceIntelligence } from "@/services/accessMeshIntelligenceService";
 import { createResource, listResources } from "@/services/resourceService";
 
 export const runtime = "nodejs";
@@ -69,15 +68,6 @@ export async function POST(request: Request) {
     const resource = await createResource({
       ...body,
       creatorWallet,
-    });
-
-    void after(async () => {
-      await analyzeResourceIntelligence(resource.id).catch((error: unknown) => {
-        console.error("AccessMesh Intelligence analysis failed", {
-          resourceId: resource.id,
-          error,
-        });
-      });
     });
 
     return NextResponse.json({

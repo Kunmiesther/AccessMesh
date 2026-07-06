@@ -194,7 +194,10 @@ export default function ExplorePage() {
           {collections.length > 0 ? (
             <div style={collectionGridStyle}>
               {collections.map((collection) => (
-                <CollectionCard key={`${collection.placement}:${collection.name}`} collection={collection} />
+                <CollectionCard
+                  key={`${collection.placement}:${collection.title}`}
+                  collection={collection}
+                />
               ))}
             </div>
           ) : !loading ? (
@@ -238,17 +241,19 @@ function CollectionCard({
     <section style={collectionCardStyle}>
       <div style={collectionHeaderStyle}>
         <div>
-          <p style={collectionPlacementStyle}>{collection.placement}</p>
-          <h3 style={collectionTitleStyle}>{collection.name}</h3>
+          {collection.placement ? (
+            <p style={collectionPlacementStyle}>{collection.placement}</p>
+          ) : null}
+          <h3 style={collectionTitleStyle}>{collection.title}</h3>
         </div>
-        <span style={collectionCountStyle}>{collection.resources.length} resources</span>
+        <span style={collectionCountStyle}>{collection.count} resources</span>
       </div>
       <div style={collectionListStyle}>
         {collection.resources.map((resource) => (
           <Link key={resource.id} href={`/resource/${resource.id}`} style={collectionResourceStyle}>
             <span style={collectionResourceTitleStyle}>{resource.title || resource.name}</span>
             <span style={collectionResourceMetaStyle}>
-              {(resource.aiCategory || resource.resourceCategory || resource.category)} · {formatUSDC(resource.priceUSDC)}
+              {(resource.aiCategory || resource.resourceCategory || resource.category)} | {formatUSDC(resource.priceUSDC)}
             </span>
           </Link>
         ))}

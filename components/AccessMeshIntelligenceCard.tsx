@@ -12,6 +12,7 @@ export function AccessMeshIntelligenceCard({
     Boolean(resource.aiSummary) ||
     Boolean(resource.aiAudience) ||
     Boolean(resource.aiCollection) ||
+    Boolean(resource.aiPlacement) ||
     Boolean(resource.aiTopics?.length) ||
     Boolean(resource.aiRelatedResources?.length);
 

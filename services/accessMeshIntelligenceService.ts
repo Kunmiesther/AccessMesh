@@ -77,15 +77,108 @@ export async function analyzeResourceIntelligence(resourceId: string) {
   return buildIntelligenceMetadata(updated, contextMeta);
 }
 
+export async function backfillAccessMeshIntelligence(params?: {
+  limit?: number;
+  force?: boolean;
+}) {
+  const limit = normalizeBackfillLimit(params?.limit);
+  const force = params?.force === true;
+
+  const resources = await prisma.resource.findMany({
+    where: force
+      ? {
+          isActive: true,
+          publishedAt: {
+            not: null,
+          },
+        }
+      : {
+          isActive: true,
+          publishedAt: {
+            not: null,
+          },
+          OR: [
+            {
+              aiAnalyzedAt: null,
+            },
+            {
+              aiSummary: null,
+            },
+          ],
+        },
+    orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
+    take: limit,
+  });
+
+  const results: Array<{
+    resourceId: string;
+    status: "analyzed" | "skipped" | "failed";
+    error?: string;
+  }> = [];
+  let analyzed = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const resource of resources) {
+    if (!force && resource.aiAnalyzedAt && resource.aiSummary) {
+      skipped += 1;
+      results.push({
+        resourceId: resource.id,
+        status: "skipped",
+      });
+      continue;
+    }
+
+    try {
+      await analyzeResourceIntelligence(resource.id);
+      analyzed += 1;
+      results.push({
+        resourceId: resource.id,
+        status: "analyzed",
+      });
+    } catch (error) {
+      failed += 1;
+      results.push({
+        resourceId: resource.id,
+        status: "failed",
+        error: error instanceof Error ? error.message : "analysis failed",
+      });
+    }
+  }
+
+  return {
+    ok: true as const,
+    analyzed,
+    skipped,
+    failed,
+    results,
+  };
+}
+
 export async function listAccessMeshIntelligenceCollections() {
   const resources = await prisma.resource.findMany({
     where: {
       isActive: true,
-      aiPlacement: {
+      publishedAt: {
         not: null,
       },
+      aiAnalyzedAt: {
+        not: null,
+      },
+      OR: [
+        {
+          aiCollection: {
+            not: null,
+          },
+        },
+        {
+          aiPlacement: {
+            not: null,
+          },
+        },
+      ],
     },
-    orderBy: [{ aiPlacement: "asc" }, { aiCollection: "asc" }, { createdAt: "desc" }],
+    orderBy: [{ aiCollection: "asc" }, { aiPlacement: "asc" }, { createdAt: "desc" }],
   });
 
   if (resources.length === 0) {
@@ -96,21 +189,27 @@ export async function listAccessMeshIntelligenceCollections() {
   const collections = new Map<string, AccessMeshIntelligenceCollection>();
 
   for (const resource of serialized) {
-    if (!resource.aiPlacement || !resource.aiCollection) {
+    const groupTitle = resource.aiCollection || resource.aiPlacement;
+    if (!groupTitle) {
       continue;
     }
 
-    const key = `${resource.aiPlacement}:${resource.aiCollection}`;
+    const key = resource.aiCollection ? `collection:${groupTitle}` : `placement:${groupTitle}`;
     const existing = collections.get(key);
 
     if (existing) {
       existing.resources.push(resource);
+      existing.count += 1;
+      if (!existing.placement && resource.aiPlacement) {
+        existing.placement = resource.aiPlacement;
+      }
       continue;
     }
 
     collections.set(key, {
-      name: resource.aiCollection,
-      placement: resource.aiPlacement,
+      title: groupTitle,
+      placement: resource.aiPlacement ?? null,
+      count: 1,
       resources: [resource],
     });
   }
@@ -123,15 +222,13 @@ export async function listAccessMeshIntelligenceCollections() {
         .slice(0, 6),
     }))
     .sort((a, b) => {
-      const placementDiff =
-        (PLACEMENT_ORDER.get(a.placement) ?? 999) -
-        (PLACEMENT_ORDER.get(b.placement) ?? 999);
+      const placementDiff = getPlacementRank(a.placement) - getPlacementRank(b.placement);
 
       if (placementDiff !== 0) {
         return placementDiff;
       }
 
-      return a.name.localeCompare(b.name);
+      return a.title.localeCompare(b.title);
     });
 }
 
@@ -306,6 +403,19 @@ function parseStoredStringArray(value: string | null | undefined) {
 
 function stringifyStringArray(value: string[] | undefined) {
   return value && value.length > 0 ? JSON.stringify(value) : null;
+}
+
+function normalizeBackfillLimit(value: number | undefined) {
+  if (!Number.isFinite(value ?? NaN)) {
+    return 10;
+  }
+
+  const normalized = Math.max(1, Math.min(100, Math.floor(value ?? 10)));
+  return normalized;
+}
+
+function getPlacementRank(value: AccessMeshIntelligencePlacement | null) {
+  return value ? PLACEMENT_ORDER.get(value) ?? 999 : 999;
 }
 
 const intelligenceResponseJsonSchema = {

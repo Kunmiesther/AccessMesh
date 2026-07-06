@@ -351,14 +351,29 @@ export type AccessMeshIntelligenceResponse =
     };
 
 export type AccessMeshIntelligenceCollection = {
-  name: string;
-  placement: AccessMeshIntelligencePlacement;
+  title: string;
+  placement: AccessMeshIntelligencePlacement | null;
+  count: number;
   resources: ResourceMeta[];
 };
 
 export type AccessMeshIntelligenceCollectionsResponse = {
   ok: true;
   collections: AccessMeshIntelligenceCollection[];
+};
+
+export type AccessMeshIntelligenceBackfillResult = {
+  resourceId: string;
+  status: "analyzed" | "skipped" | "failed";
+  error?: string;
+};
+
+export type AccessMeshIntelligenceBackfillResponse = {
+  ok: boolean;
+  analyzed: number;
+  skipped: number;
+  failed: number;
+  results: AccessMeshIntelligenceBackfillResult[];
 };
 
 export type RecentActivityEntry = {

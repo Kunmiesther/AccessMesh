@@ -8,7 +8,12 @@ import { type Address } from "viem";
 import { CoverImageUpload } from "@/components/CoverImageUpload";
 import { MarkdownContent } from "@/components/MarkdownContent";
 import { Navbar } from "@/components/Navbar";
-import { ApiError, getPublishFeeConfig, postResource } from "@/lib/api";
+import {
+  ApiError,
+  getPublishFeeConfig,
+  postAnalyzeResourceIntelligence,
+  postResource,
+} from "@/lib/api";
 import { executePublishFeePayment } from "@/lib/publish-payment";
 import { useWallet } from "@/lib/ui/WalletContext";
 import type {
@@ -221,6 +226,7 @@ export function CreateResourcePage() {
       );
 
       console.info("STEP 9 Resource created", response.resource.id);
+      scheduleIntelligenceAnalysis(response.resource.id);
       router.replace(`/resource/${response.resource.id}?published=1`);
     } catch (error) {
       if (error instanceof ApiError) {
@@ -672,6 +678,20 @@ function HashBlock({ label, hash }: { label: string; hash: string }) {
       <p style={hashValueStyle}>{hash}</p>
     </div>
   );
+}
+
+function scheduleIntelligenceAnalysis(resourceId: string) {
+  void (async () => {
+    try {
+      await postAnalyzeResourceIntelligence(resourceId);
+      console.info("[publish] intelligence analysis completed", { resourceId });
+    } catch (error) {
+      console.error("[publish] intelligence analysis failed", {
+        resourceId,
+        error,
+      });
+    }
+  })();
 }
 
 async function buildResourceData(params: {
