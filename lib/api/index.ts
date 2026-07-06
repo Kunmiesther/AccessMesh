@@ -1,5 +1,7 @@
 import type {
   AccessIntentResponse,
+  AccessMeshIntelligenceCollectionsResponse,
+  AccessMeshIntelligenceResponse,
   CctpBridgeRecordRequest,
   CctpBridgeRecordResponse,
   ProtectedResourceResponse,
@@ -156,6 +158,12 @@ export async function getMarketplaceResources(): Promise<ResourceListResponse> {
   return apiFetch<ResourceListResponse>("/api/resources");
 }
 
+export async function getAccessMeshIntelligenceCollections(): Promise<AccessMeshIntelligenceCollectionsResponse> {
+  return apiFetch<AccessMeshIntelligenceCollectionsResponse>(
+    "/api/intelligence/collections",
+  );
+}
+
 export async function getResourceDetail(
   resourceId: string,
   wallet?: string | null,
@@ -231,4 +239,16 @@ export async function getRecentActivity(): Promise<RecentActivityResponse> {
 export async function getDashboard(wallet: string): Promise<DashboardResponse> {
   const params = new URLSearchParams({ wallet });
   return apiFetch<DashboardResponse>(`/api/dashboard?${params}`);
+}
+
+export async function postAnalyzeResourceIntelligence(
+  resourceId: string,
+): Promise<AccessMeshIntelligenceResponse> {
+  return apiFetch<AccessMeshIntelligenceResponse>(
+    "/api/intelligence/analyze-resource",
+    {
+      method: "POST",
+      body: JSON.stringify({ resourceId }),
+    },
+  );
 }

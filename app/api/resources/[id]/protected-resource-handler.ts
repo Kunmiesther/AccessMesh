@@ -32,10 +32,9 @@ export async function handleProtectedResourceGET(
       return NextResponse.json(
         {
           ok: false,
-          error: {
-            code: "ACCESSMESH_PAYMENT_REQUIRED",
-            message: "Payment required",
-          },
+          error: "Payment required",
+          code: "ACCESSMESH_PAYMENT_REQUIRED",
+          resourceId: id,
           resource: {
             ...access.resource,
             ...resourceMetadata,

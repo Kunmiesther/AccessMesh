@@ -171,7 +171,11 @@ export async function getResourceDetail(id: string, wallet?: string | null) {
         })),
     );
 
-  return toResourceDetail(resource, owned);
+  const relatedResources = await getRelatedResourcePreviews(
+    parseStoredStringArray(resource.aiRelatedResourceIds),
+  );
+
+  return toResourceDetail(resource, owned, relatedResources);
 }
 
 export async function validateAccess(resourceId: string, wallet: string) {
@@ -276,6 +280,8 @@ export function serializeResource(resource: ResourceRecord): ResourceMeta {
   const type = normalizeStoredResourceType(resource.type || resource.category);
   const resourceType = normalizeStoredPublishedResourceType(resource.resourceType);
   const previewText = buildPreviewText(resource);
+  const aiTopics = parseStoredStringArray(resource.aiTopics);
+  const aiRelatedResourceIds = parseStoredStringArray(resource.aiRelatedResourceIds);
 
   return {
     id: resource.id,
@@ -290,6 +296,15 @@ export function serializeResource(resource: ResourceRecord): ResourceMeta {
     resourceType,
     priceUSDC: resource.priceUSDC,
     previewText,
+    aiSummary: normalizeOptionalStoredText(resource.aiSummary) ?? null,
+    aiTopics,
+    aiCategory: normalizeOptionalStoredText(resource.aiCategory) ?? null,
+    aiAudience: normalizeOptionalStoredText(resource.aiAudience) ?? null,
+    aiCollection: normalizeOptionalStoredText(resource.aiCollection) ?? null,
+    aiPlacement: normalizeStoredPlacement(resource.aiPlacement),
+    aiRelatedResourceIds,
+    aiReasoning: normalizeOptionalStoredText(resource.aiReasoning) ?? null,
+    aiAnalyzedAt: resource.aiAnalyzedAt?.toISOString() ?? null,
     coverImage: resource.coverImage,
     tags: parseStoredTags(resource.tags),
     unlockCount: resource.unlockCount,
@@ -301,13 +316,18 @@ export function serializeResource(resource: ResourceRecord): ResourceMeta {
   };
 }
 
-function toResourceDetail(resource: ResourceRecord, owned: boolean): ResourceDetail {
+function toResourceDetail(
+  resource: ResourceRecord,
+  owned: boolean,
+  relatedResources: ResourceDetail["aiRelatedResources"] = [],
+): ResourceDetail {
   const meta = serializeResource(resource);
   const resourceUrl = normalizeOptionalStoredText(resource.resourceUrl || resource.endpoint);
   const resourceContent = normalizeOptionalStoredText(resource.resourceContent);
 
   return {
     ...meta,
+    aiRelatedResources: relatedResources,
     owned,
     resourceUrl: owned ? resourceUrl : undefined,
     endpoint: owned ? resourceUrl : undefined,
@@ -452,6 +472,23 @@ function parseStoredTags(value: string) {
   return [];
 }
 
+function parseStoredStringArray(value: string | null | undefined) {
+  if (typeof value !== "string") {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((item): item is string => typeof item === "string");
+    }
+  } catch {
+    return [];
+  }
+
+  return [];
+}
+
 function buildPreviewText(resource: ResourceRecord) {
   const resourceType =
     normalizeStoredPublishedResourceType(resource.resourceType) ??
@@ -505,6 +542,58 @@ function inferStoredPublishedResourceType(resource: ResourceRecord) {
   }
 
   return "EXTERNAL_LINK" as const;
+}
+
+function normalizeStoredPlacement(value: string | null | undefined) {
+  if (
+    value === "Featured" ||
+    value === "Emerging" ||
+    value === "Infrastructure" ||
+    value === "AI Agents" ||
+    value === "Payments" ||
+    value === "Developer Tools" ||
+    value === "Research" ||
+    value === "Beginner Friendly"
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+async function getRelatedResourcePreviews(relatedIds: string[]) {
+  if (relatedIds.length === 0) {
+    return [];
+  }
+
+  const resources = await prisma.resource.findMany({
+    where: {
+      id: { in: relatedIds },
+      isActive: true,
+    },
+    select: {
+      id: true,
+      title: true,
+      name: true,
+      priceUSDC: true,
+      creatorWallet: true,
+      creatorDisplayName: true,
+    },
+  });
+
+  const byId = new Map(resources.map((resource) => [resource.id, resource]));
+
+  return relatedIds
+    .map((id) => byId.get(id))
+    .filter((resource): resource is NonNullable<typeof resource> => Boolean(resource))
+    .map((resource) => ({
+      id: resource.id,
+      title: resource.title || resource.name,
+      priceUSDC: resource.priceUSDC,
+      creatorWallet: resource.creatorWallet,
+      creatorDisplayName:
+        normalizeOptionalStoredText(resource.creatorDisplayName) ?? null,
+    }));
 }
 
 function normalizeOptionalStoredText(value: string | null | undefined) {

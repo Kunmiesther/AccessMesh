@@ -3,6 +3,7 @@ import { ArcTestnet } from "@circle-fin/app-kit/chains";
 import { prisma } from "@/lib/prisma";
 import { UNKNOWN_WALLET } from "@/lib/validation";
 import type {
+  AccessMeshIntelligencePlacement,
   PaymentRequiredAgentMetadata,
   PaymentRequiredMetadata,
   PaymentRequiredResourceMetadata,
@@ -68,7 +69,14 @@ type AccessMetadataResource = {
   resourceCategory?: string | null;
   creatorWallet: string;
   creatorDisplayName?: string | null;
-  tags?: string | string[];
+  tags?: string | string[] | null;
+  aiSummary?: string | null;
+  aiTopics?: string | string[] | null;
+  aiCategory?: string | null;
+  aiAudience?: string | null;
+  aiCollection?: string | null;
+  aiPlacement?: string | null;
+  aiRelatedResourceIds?: string | string[] | null;
 };
 
 export function buildPaymentMetadata(params: {
@@ -87,25 +95,36 @@ export function buildPaymentRequiredResourceMetadata(
   resource: AccessMetadataResource,
 ) {
   const category =
+    normalizeOptionalText(resource.aiCategory) ??
     normalizeOptionalText(resource.resourceCategory) ??
     normalizeOptionalText(resource.category);
-  const topics = normalizeTopics(resource.tags);
+  const topics = normalizeTopics(resource.aiTopics ?? resource.tags);
   const creator =
     normalizeOptionalText(resource.creatorDisplayName) ?? resource.creatorWallet;
+  const summary =
+    normalizeOptionalText(resource.aiSummary) ?? resource.description;
+  const audience = normalizeOptionalText(resource.aiAudience);
+  const collection = normalizeOptionalText(resource.aiCollection);
+  const placement = normalizePlacement(resource.aiPlacement);
+  const relatedResourceIds = normalizeTopics(resource.aiRelatedResourceIds);
 
   return {
     title: normalizeOptionalText(resource.title) ?? resource.name,
-    summary: resource.description,
+    summary,
     creator,
     ...(category ? { category } : {}),
     ...(topics.length > 0 ? { topics } : {}),
+    ...(audience ? { audience } : {}),
+    ...(collection ? { collection } : {}),
+    ...(placement ? { placement } : {}),
+    ...(relatedResourceIds.length > 0 ? { relatedResourceIds } : {}),
   } satisfies PaymentRequiredResourceMetadata;
 }
 
 export function buildPaymentRequiredAgentMetadata() {
   return {
     decisionContext:
-      "This response gives an automated client enough context to decide whether the protected resource is worth purchasing for its current task.",
+      "This payment challenge includes discovery metadata so automated clients can reason about whether the protected resource is relevant to their current task.",
     retryAfterPayment: true,
   } satisfies PaymentRequiredAgentMetadata;
 }
@@ -157,7 +176,7 @@ function normalizeOptionalText(value: string | null | undefined) {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function normalizeTopics(value: string | string[] | undefined) {
+function normalizeTopics(value: string | string[] | null | undefined) {
   if (Array.isArray(value)) {
     return value.filter((topic): topic is string => typeof topic === "string");
   }
@@ -176,4 +195,21 @@ function normalizeTopics(value: string | string[] | undefined) {
   }
 
   return [];
+}
+
+function normalizePlacement(value: string | null | undefined) {
+  if (
+    value === "Featured" ||
+    value === "Emerging" ||
+    value === "Infrastructure" ||
+    value === "AI Agents" ||
+    value === "Payments" ||
+    value === "Developer Tools" ||
+    value === "Research" ||
+    value === "Beginner Friendly"
+  ) {
+    return value as AccessMeshIntelligencePlacement;
+  }
+
+  return undefined;
 }

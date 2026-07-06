@@ -40,6 +40,15 @@ model Resource {
   publishTxHash  String?  @unique
   publishFeeUSDC Float?
   publishedAt    DateTime?
+  aiSummary      String?
+  aiTopics       String?
+  aiCategory     String?
+  aiAudience     String?
+  aiCollection   String?
+  aiPlacement    String?
+  aiRelatedResourceIds String?
+  aiReasoning    String?
+  aiAnalyzedAt   DateTime?
   createdAt      DateTime @default(now())
 
   owner          User     @relation(fields: [ownerId], references: [id])

@@ -3,9 +3,14 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Navbar } from "@/components/Navbar";
-import { getMarketplaceResources } from "@/lib/api";
+import { getAccessMeshIntelligenceCollections, getMarketplaceResources } from "@/lib/api";
 import { formatUSDC, shortAddress } from "@/lib/ui";
-import type { ResourceMeta, ResourceType, SortMode } from "@/types";
+import type {
+  AccessMeshIntelligenceCollection,
+  ResourceMeta,
+  ResourceType,
+  SortMode,
+} from "@/types";
 
 const defaultCategories: Array<ResourceType | "ALL"> = [
   "ALL",
@@ -17,6 +22,7 @@ const defaultCategories: Array<ResourceType | "ALL"> = [
 
 export default function ExplorePage() {
   const [resources, setResources] = useState<ResourceMeta[]>([]);
+  const [collections, setCollections] = useState<AccessMeshIntelligenceCollection[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<string>("ALL");
@@ -25,15 +31,14 @@ export default function ExplorePage() {
   useEffect(() => {
     let cancelled = false;
 
-    getMarketplaceResources()
-      .then((res) => {
+    Promise.all([
+      getMarketplaceResources().catch(() => ({ resources: [] })),
+      getAccessMeshIntelligenceCollections().catch(() => ({ collections: [] })),
+    ])
+      .then(([resourceRes, collectionsRes]) => {
         if (!cancelled) {
-          setResources(res.resources);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setResources([]);
+          setResources(resourceRes.resources);
+          setCollections(collectionsRes.collections);
         }
       })
       .finally(() => {
@@ -81,9 +86,13 @@ export default function ExplorePage() {
           resource.name,
           resource.description,
           resourceCategory,
+          resource.aiCategory,
+          resource.aiAudience,
+          resource.aiCollection,
           creatorLabel,
           resource.creatorWallet,
           ...(resource.tags ?? []),
+          ...(resource.aiTopics ?? []),
         ]
           .join(" ")
           .toLowerCase()
@@ -171,6 +180,33 @@ export default function ExplorePage() {
           </label>
         </section>
 
+        <section style={intelligenceSectionStyle}>
+          <div style={intelligenceIntroStyle}>
+            <p style={eyebrowStyle}>AccessMesh Intelligence</p>
+            <h2 style={intelligenceTitleStyle}>AI-organized discovery collections</h2>
+            <p style={subtitleStyle}>
+              AccessMesh Intelligence analyzes published resources and organizes
+              them into discovery collections so buyers and agents can find
+              relevant premium knowledge faster.
+            </p>
+          </div>
+
+          {collections.length > 0 ? (
+            <div style={collectionGridStyle}>
+              {collections.map((collection) => (
+                <CollectionCard key={`${collection.placement}:${collection.name}`} collection={collection} />
+              ))}
+            </div>
+          ) : !loading ? (
+            <div style={collectionEmptyStyle}>
+              <p style={{ color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                Discovery collections will appear here after published resources are
+                analyzed. Marketplace browsing still works normally in the meantime.
+              </p>
+            </div>
+          ) : null}
+        </section>
+
         {loading ? (
           <section style={emptyStateStyle}>
             <p style={{ color: "var(--text-muted)" }}>Loading published resources...</p>
@@ -190,6 +226,34 @@ export default function ExplorePage() {
         )}
       </main>
     </div>
+  );
+}
+
+function CollectionCard({
+  collection,
+}: {
+  collection: AccessMeshIntelligenceCollection;
+}) {
+  return (
+    <section style={collectionCardStyle}>
+      <div style={collectionHeaderStyle}>
+        <div>
+          <p style={collectionPlacementStyle}>{collection.placement}</p>
+          <h3 style={collectionTitleStyle}>{collection.name}</h3>
+        </div>
+        <span style={collectionCountStyle}>{collection.resources.length} resources</span>
+      </div>
+      <div style={collectionListStyle}>
+        {collection.resources.map((resource) => (
+          <Link key={resource.id} href={`/resource/${resource.id}`} style={collectionResourceStyle}>
+            <span style={collectionResourceTitleStyle}>{resource.title || resource.name}</span>
+            <span style={collectionResourceMetaStyle}>
+              {(resource.aiCategory || resource.resourceCategory || resource.category)} · {formatUSDC(resource.priceUSDC)}
+            </span>
+          </Link>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -566,4 +630,103 @@ const emptyStateStyle = {
   border: "1px solid var(--border)",
   borderRadius: 12,
   padding: 24,
+} satisfies CSSProperties;
+
+const intelligenceSectionStyle = {
+  display: "grid",
+  gap: 18,
+  marginBottom: 28,
+} satisfies CSSProperties;
+
+const intelligenceIntroStyle = {
+  background:
+    "linear-gradient(135deg, rgba(0,194,168,0.05), rgba(255,255,255,0.02)), var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 12,
+  padding: 22,
+} satisfies CSSProperties;
+
+const intelligenceTitleStyle = {
+  fontSize: 22,
+  lineHeight: 1.25,
+  color: "var(--text-primary)",
+  marginBottom: 10,
+} satisfies CSSProperties;
+
+const collectionGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
+  gap: 16,
+} satisfies CSSProperties;
+
+const collectionCardStyle = {
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 12,
+  padding: 18,
+  display: "grid",
+  gap: 14,
+} satisfies CSSProperties;
+
+const collectionHeaderStyle = {
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  gap: 12,
+  flexWrap: "wrap",
+} satisfies CSSProperties;
+
+const collectionPlacementStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 10,
+  color: "var(--accent)",
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  marginBottom: 6,
+} satisfies CSSProperties;
+
+const collectionTitleStyle = {
+  fontSize: 18,
+  lineHeight: 1.3,
+  color: "var(--text-primary)",
+} satisfies CSSProperties;
+
+const collectionCountStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 11,
+  color: "var(--text-muted)",
+} satisfies CSSProperties;
+
+const collectionListStyle = {
+  display: "grid",
+  gap: 10,
+} satisfies CSSProperties;
+
+const collectionResourceStyle = {
+  display: "grid",
+  gap: 4,
+  padding: 12,
+  borderRadius: 8,
+  border: "1px solid var(--border-subtle)",
+  background: "rgba(255,255,255,0.02)",
+  textDecoration: "none",
+} satisfies CSSProperties;
+
+const collectionResourceTitleStyle = {
+  color: "var(--text-primary)",
+  fontSize: 14,
+  lineHeight: 1.45,
+} satisfies CSSProperties;
+
+const collectionResourceMetaStyle = {
+  color: "var(--text-secondary)",
+  fontFamily: "var(--font-mono)",
+  fontSize: 11,
+} satisfies CSSProperties;
+
+const collectionEmptyStyle = {
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 12,
+  padding: 20,
 } satisfies CSSProperties;

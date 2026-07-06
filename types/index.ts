@@ -1,7 +1,14 @@
 export type ResourceType = "API" | "CONTENT" | "TOOL" | "DATASET";
 export type PublishedResourceType = "ARTICLE" | "FILE_UPLOAD" | "EXTERNAL_LINK";
-export type UnlockAdvisorRecommendation = "BUY" | "CONSIDER" | "SKIP";
-export type UnlockAdvisorDifficulty = "Beginner" | "Intermediate" | "Advanced";
+export type AccessMeshIntelligencePlacement =
+  | "Featured"
+  | "Emerging"
+  | "Infrastructure"
+  | "AI Agents"
+  | "Payments"
+  | "Developer Tools"
+  | "Research"
+  | "Beginner Friendly";
 
 export type ActivityEventType =
   | "RESOURCE_PUBLISHED"
@@ -13,7 +20,28 @@ export type ActivityEventType =
 
 export type SortMode = "newest" | "price-asc" | "price-desc";
 
-export type ResourceMeta = {
+export type RelatedResourcePreview = {
+  id: string;
+  title: string;
+  priceUSDC: number;
+  creatorWallet: string;
+  creatorDisplayName: string | null;
+};
+
+export type AccessMeshIntelligenceMetadata = {
+  aiSummary?: string | null;
+  aiTopics?: string[];
+  aiCategory?: string | null;
+  aiAudience?: string | null;
+  aiCollection?: string | null;
+  aiPlacement?: AccessMeshIntelligencePlacement | null;
+  aiRelatedResourceIds?: string[];
+  aiReasoning?: string | null;
+  aiAnalyzedAt?: string | null;
+  aiRelatedResources?: RelatedResourcePreview[];
+};
+
+export type ResourceMeta = AccessMeshIntelligenceMetadata & {
   id: string;
   creatorWallet: string;
   creatorDisplayName: string | null;
@@ -264,10 +292,10 @@ export type PaymentRequiredResourceMetadata = {
   creator?: string;
   category?: string;
   topics?: string[];
-  difficulty?: string;
-  estimatedAudience?: string;
-  qualityScore?: string;
-  agentReasoningHint?: string;
+  audience?: string;
+  collection?: string;
+  placement?: AccessMeshIntelligencePlacement;
+  relatedResourceIds?: string[];
 };
 
 export type PaymentRequiredAgentMetadata = {
@@ -289,11 +317,9 @@ export type ProtectedResourceResponse =
     }
   | {
       ok: false;
-      error: {
-        code: string;
-        message: string;
-        details?: Record<string, unknown>;
-      };
+      error: string;
+      code: string;
+      resourceId: string;
       resource: ResourceDetail & PaymentRequiredResourceMetadata;
       accepts: X402Accept[];
       x402: X402PaymentRequired;
@@ -303,27 +329,37 @@ export type ProtectedResourceResponse =
       retry?: PaymentRequiredRetryMetadata;
     };
 
-export type UnlockAdvisorResult = {
-  recommendation: UnlockAdvisorRecommendation;
-  confidence: number;
-  valueScore: number;
-  difficulty: UnlockAdvisorDifficulty;
-  bestFor: string[];
-  reason: string;
-  possibleOverlap: string;
-  priceAssessment: string;
-  agentDecisionSummary: string;
+export type AccessMeshIntelligenceResult = {
+  summary?: string;
+  topics?: string[];
+  category?: string;
+  audience?: string;
+  collection?: string;
+  placement?: AccessMeshIntelligencePlacement;
+  relatedResourceIds?: string[];
+  reasoning?: string;
 };
 
-export type UnlockAdvisorResponse =
+export type AccessMeshIntelligenceResponse =
   | {
       ok: true;
-      advisor: UnlockAdvisorResult;
+      intelligence: AccessMeshIntelligenceMetadata;
     }
   | {
       ok: false;
       message: string;
     };
+
+export type AccessMeshIntelligenceCollection = {
+  name: string;
+  placement: AccessMeshIntelligencePlacement;
+  resources: ResourceMeta[];
+};
+
+export type AccessMeshIntelligenceCollectionsResponse = {
+  ok: true;
+  collections: AccessMeshIntelligenceCollection[];
+};
 
 export type RecentActivityEntry = {
   id: string;
