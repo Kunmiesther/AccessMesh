@@ -521,8 +521,8 @@ export function CreateResourcePage() {
                   ? "Preparing..."
                   : state.status === "paying"
                     ? "Submitting payment..."
-                    : state.status === "publishing"
-                      ? "Payment confirmed. Publishing resource..."
+                  : state.status === "publishing"
+                      ? "UserOperation confirmed. Publishing resource..."
                       : publishFeeConfig
                         ? "Publish"
                         : "Loading publish fee..."}
@@ -612,7 +612,7 @@ function PublishConfirmationModal({
     status === "paying"
       ? "Submitting payment..."
       : status === "publishing"
-        ? "Payment confirmed. Publishing resource..."
+        ? "UserOperation confirmed. Publishing resource..."
         : "Pay fee and publish";
 
   return (

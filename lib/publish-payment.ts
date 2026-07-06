@@ -1,4 +1,7 @@
+"use client";
+
 import { ArcTestnet } from "@circle-fin/app-kit/chains";
+import { modularWalletActions } from "@circle-fin/modular-wallets-core";
 import {
   encodeFunctionData,
   erc20Abi,
@@ -7,12 +10,19 @@ import {
   type Address,
   type Hash,
 } from "viem";
-import { WaitForUserOperationReceiptTimeoutError } from "viem/account-abstraction";
+import { estimateFeesPerGas } from "viem/actions";
+import {
+  prepareUserOperation,
+  sendUserOperation,
+  type UserOperation,
+  WaitForUserOperationReceiptTimeoutError,
+} from "viem/account-abstraction";
 import type { ModularWalletSession } from "@/lib/modular-wallet";
 
 const PUBLISH_LOOKUP_TIMEOUT_MS = 15_000;
 const PUBLISH_CONFIRMATION_ERROR_MESSAGE =
   "Payment was submitted but could not be confirmed. Please wait a moment and check your wallet/activity before retrying.";
+const MIN_PUBLISH_PRIORITY_FEE_PER_GAS = BigInt(1_000_000_000);
 
 type PublishBundlerClient = NonNullable<ModularWalletSession["bundlerClient"]>;
 type PublishCall = {
@@ -72,18 +82,32 @@ export async function executePublishFeePayment(params: {
     value: BigInt(0),
   };
 
-  const request = {
+  console.info("STEP 3 Building user operation");
+
+  const fees = await resolvePublishUserOperationFees({
+    bundlerClient: params.bundlerClient,
+  });
+  console.info("[publish] user operation fees", {
+    source: fees.source,
+    maxFeePerGas: fees.maxFeePerGas.toString(),
+    maxPriorityFeePerGas: fees.maxPriorityFeePerGas.toString(),
+  });
+
+  const preparedRequest = await prepareUserOperation(params.bundlerClient, {
     account,
     calls: [call],
-  };
+    maxFeePerGas: fees.maxFeePerGas,
+    maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
+    parameters: ["factory", "fees", "gas", "paymaster", "nonce"],
+  });
 
-  console.info("STEP 3 Building user operation");
   console.info(
-    "[publish] user operation request",
+    "[publish] prepared user operation",
     summarizePublishUserOperationRequest({
-      request,
+      request: preparedRequest,
       chainId: activeChainId,
       accountAddress: account.address,
+      entryPointAddress: account.entryPoint.address,
       calls: [call],
     }),
   );
@@ -92,15 +116,34 @@ export async function executePublishFeePayment(params: {
 
   try {
     console.info("STEP 4 Sending user operation");
-    userOpHash = await params.bundlerClient.sendUserOperation(request);
+    const signature = (await account.signUserOperation(
+      preparedRequest as UserOperation,
+    )) as `0x${string}`;
+    const signedRequest = {
+      ...preparedRequest,
+      signature,
+    } as UserOperation;
+
+    const sendClient = {
+      ...params.bundlerClient,
+      account: undefined,
+    } as PublishBundlerClient & { account: undefined };
+
+    userOpHash = await sendUserOperation(sendClient, {
+      ...signedRequest,
+      account: undefined,
+      entryPointAddress: account.entryPoint.address,
+    });
     console.info("STEP 5 User operation hash received", userOpHash);
+    console.info("Publish fee sent", { userOpHash });
   } catch (error) {
     console.error(
       "[publish] sendUserOperation request",
       summarizePublishUserOperationRequest({
-        request,
+        request: preparedRequest,
         chainId: activeChainId,
         accountAddress: account.address,
+        entryPointAddress: account.entryPoint.address,
         calls: [call],
       }),
     );
@@ -112,7 +155,7 @@ export async function executePublishFeePayment(params: {
     userOpHash,
     timeoutMs: params.timeoutMs,
   });
-  console.info("STEP 7 Payment confirmed", confirmation.transactionHash);
+  console.info("STEP 7 Confirmed", confirmation.transactionHash);
 
   return {
     userOpHash,
@@ -190,6 +233,66 @@ async function waitForPublishConfirmation(params: {
 
     throw new Error(PUBLISH_CONFIRMATION_ERROR_MESSAGE);
   }
+}
+
+async function resolvePublishUserOperationFees(params: {
+  bundlerClient: PublishBundlerClient;
+}) {
+  if (!params.bundlerClient.client) {
+    throw new Error("Publish public client is unavailable.");
+  }
+
+  const circleClient = params.bundlerClient.client.extend(modularWalletActions);
+
+  try {
+    const gasPrice = await circleClient.getUserOperationGasPrice();
+    return normalizePublishFeePair({
+      maxFeePerGas: BigInt(gasPrice.high.maxFeePerGas),
+      maxPriorityFeePerGas: BigInt(gasPrice.high.maxPriorityFeePerGas),
+      source: "circle.high",
+    });
+  } catch (circleError) {
+    console.warn("[publish] Circle user-operation gas price lookup failed", {
+      error: circleError instanceof Error ? circleError.message : String(circleError),
+    });
+  }
+
+  const viemFees = await estimateFeesPerGas(params.bundlerClient.client, {
+    chain: params.bundlerClient.chain,
+    type: "eip1559",
+  });
+
+  return normalizePublishFeePair({
+    maxFeePerGas: viemFees.maxFeePerGas,
+    maxPriorityFeePerGas: viemFees.maxPriorityFeePerGas,
+    source: "viem.estimateFeesPerGas",
+  });
+}
+
+function normalizePublishFeePair(params: {
+  maxFeePerGas: bigint;
+  maxPriorityFeePerGas: bigint;
+  source: string;
+}) {
+  const normalizedPriorityFeePerGas =
+    params.maxPriorityFeePerGas < MIN_PUBLISH_PRIORITY_FEE_PER_GAS
+      ? MIN_PUBLISH_PRIORITY_FEE_PER_GAS
+      : params.maxPriorityFeePerGas;
+  const baseFeePerGas =
+    params.maxFeePerGas > params.maxPriorityFeePerGas
+      ? params.maxFeePerGas - params.maxPriorityFeePerGas
+      : BigInt(0);
+  const normalizedMaxFeePerGas =
+    baseFeePerGas + normalizedPriorityFeePerGas;
+
+  return {
+    maxFeePerGas:
+      normalizedMaxFeePerGas > normalizedPriorityFeePerGas
+        ? normalizedMaxFeePerGas
+        : normalizedPriorityFeePerGas,
+    maxPriorityFeePerGas: normalizedPriorityFeePerGas,
+    source: params.source,
+  };
 }
 
 async function tryGetPublishUserOperationReceipt(
@@ -276,14 +379,14 @@ async function withTimeout<T>(
 
 function summarizePublishUserOperationRequest(params: {
   request: {
-    account: PublishBundlerClient["account"];
-    calls: PublishCall[];
     sender?: Address;
+    callData?: `0x${string}`;
     callGasLimit?: bigint;
     verificationGasLimit?: bigint;
     preVerificationGas?: bigint;
     maxFeePerGas?: bigint;
     maxPriorityFeePerGas?: bigint;
+    nonce?: bigint;
     paymaster?: Address;
     paymasterData?: `0x${string}`;
     paymasterVerificationGasLimit?: bigint;
@@ -291,30 +394,51 @@ function summarizePublishUserOperationRequest(params: {
   };
   chainId: number;
   accountAddress: Address;
+  entryPointAddress: Address;
   calls: PublishCall[];
 }) {
+  const paymasterData = params.request.paymasterData;
   const firstCall = params.calls[0];
 
   return {
-    accountAddress: params.accountAddress,
+    account: {
+      address: params.accountAddress,
+      entryPointAddress: params.entryPointAddress,
+    },
     sender: params.request.sender ?? params.accountAddress,
-    chainId: params.chainId,
-    callsCount: params.calls.length,
+    chain: {
+      id: params.chainId,
+      name: ArcTestnet.name,
+    },
+    calls: params.calls.map((call) => ({
+      target: call.to,
+      calldataLength: Math.max((call.data.length - 2) / 2, 0),
+      value: call.value.toString(),
+    })),
     firstCallTarget: firstCall?.to ?? null,
     firstCallCalldataLength: firstCall
       ? Math.max((firstCall.data.length - 2) / 2, 0)
+      : null,
+    callDataLength: params.request.callData
+      ? Math.max((params.request.callData.length - 2) / 2, 0)
       : null,
     callGasLimit: stringifyBigInt(params.request.callGasLimit),
     verificationGasLimit: stringifyBigInt(params.request.verificationGasLimit),
     preVerificationGas: stringifyBigInt(params.request.preVerificationGas),
     maxFeePerGas: stringifyBigInt(params.request.maxFeePerGas),
     maxPriorityFeePerGas: stringifyBigInt(params.request.maxPriorityFeePerGas),
-    paymasterPresent: Boolean(params.request.paymaster),
-    paymasterDataPresent: Boolean(params.request.paymasterData),
-    paymasterVerificationGasLimitPresent:
-      typeof params.request.paymasterVerificationGasLimit !== "undefined",
-    paymasterPostOpGasLimitPresent:
-      typeof params.request.paymasterPostOpGasLimit !== "undefined",
+    nonce: stringifyBigInt(params.request.nonce),
+    paymaster: params.request.paymaster ?? null,
+    paymasterDataLength:
+      typeof paymasterData === "string"
+        ? Math.max((paymasterData.length - 2) / 2, 0)
+        : null,
+    paymasterVerificationGasLimit: stringifyBigInt(
+      params.request.paymasterVerificationGasLimit,
+    ),
+    paymasterPostOpGasLimit: stringifyBigInt(
+      params.request.paymasterPostOpGasLimit,
+    ),
   };
 }
 
