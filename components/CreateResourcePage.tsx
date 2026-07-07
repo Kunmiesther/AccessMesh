@@ -3,7 +3,15 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CSSProperties, ReactNode } from "react";
-import { FormEvent, useEffect, useRef, useState, type RefObject } from "react";
+import {
+  FormEvent,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type MutableRefObject,
+  type RefObject,
+} from "react";
 import { type Address } from "viem";
 import { CoverImageUpload } from "@/components/CoverImageUpload";
 import { MarkdownContent } from "@/components/MarkdownContent";
@@ -85,6 +93,7 @@ export function CreateResourcePage() {
   const [coverImageFile, setCoverImageFile] = useState<File | null>(null);
   const [tags, setTags] = useState("");
   const articleTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const pendingArticleRestoreRef = useRef<PendingArticleRestore | null>(null);
   const publishConfirmationInFlightRef = useRef(false);
 
   useEffect(() => {
@@ -92,6 +101,24 @@ export function CreateResourcePage() {
       router.replace("/wallet?next=/create");
     }
   }, [connected, ready, router]);
+
+  useLayoutEffect(() => {
+    const textarea = articleTextareaRef.current;
+    const pendingRestore = pendingArticleRestoreRef.current;
+
+    if (!textarea || !pendingRestore) {
+      return;
+    }
+
+    pendingArticleRestoreRef.current = null;
+    textarea.focus({ preventScroll: true });
+    textarea.scrollTop = pendingRestore.scrollTop;
+    textarea.scrollLeft = pendingRestore.scrollLeft;
+    textarea.setSelectionRange(
+      pendingRestore.selectionStart,
+      pendingRestore.selectionEnd,
+    );
+  }, [articleContent]);
 
   useEffect(() => {
     if (!ready || !connected || !address) {
@@ -396,8 +423,16 @@ export function CreateResourcePage() {
                             key={item.label}
                             type="button"
                             disabled={disabled || editorMode !== "write"}
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                            }}
                             onClick={() =>
-                              applyArticleMarkdown(articleTextareaRef, setArticleContent, item.insert)
+                              applyArticleMarkdown(
+                                articleTextareaRef,
+                                pendingArticleRestoreRef,
+                                setArticleContent,
+                                item.insert,
+                              )
                             }
                             style={toolbarButtonStyle}
                             title={item.title}
@@ -694,6 +729,13 @@ function scheduleIntelligenceAnalysis(resourceId: string) {
   })();
 }
 
+type PendingArticleRestore = {
+  selectionStart: number;
+  selectionEnd: number;
+  scrollTop: number;
+  scrollLeft: number;
+};
+
 async function buildResourceData(params: {
   resourceType: PublishedResourceType;
   articleContent: string;
@@ -736,6 +778,7 @@ async function buildResourceData(params: {
 
 function applyArticleMarkdown(
   textareaRef: RefObject<HTMLTextAreaElement | null>,
+  pendingRestoreRef: MutableRefObject<PendingArticleRestore | null>,
   setArticleContent: (value: string) => void,
   formatter: (
     value: string,
@@ -748,17 +791,21 @@ function applyArticleMarkdown(
     return;
   }
 
+  const scrollTop = textarea.scrollTop;
+  const scrollLeft = textarea.scrollLeft;
   const result = formatter(
     textarea.value,
     textarea.selectionStart,
     textarea.selectionEnd,
   );
-  setArticleContent(result.value);
 
-  window.requestAnimationFrame(() => {
-    textarea.focus();
-    textarea.setSelectionRange(result.selectionStart, result.selectionEnd);
-  });
+  pendingRestoreRef.current = {
+    selectionStart: result.selectionStart,
+    selectionEnd: result.selectionEnd,
+    scrollTop,
+    scrollLeft,
+  };
+  setArticleContent(result.value);
 }
 
 function wrapSelection(
@@ -806,18 +853,35 @@ function prefixSelectedLines(
   value: string,
   selectionStart: number,
   selectionEnd: number,
-  formatter: (line: string, index: number) => string,
-  placeholder: string,
+  formatter: (line: string, index: number, isCollapsed: boolean) => string,
 ): MarkdownInsertionResult {
   const blockStart = value.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
-  const rawSelection = value.slice(blockStart, selectionEnd);
-  const baseBlock = rawSelection.length > 0 ? rawSelection : placeholder;
-  const nextBlock = baseBlock
-    .split("\n")
-    .map((line, index) => formatter(line || placeholder, index))
-    .join("\n");
+  const blockEndIndex = value.indexOf("\n", selectionEnd);
+  const blockEnd = blockEndIndex === -1 ? value.length : blockEndIndex;
+  const block = value.slice(blockStart, blockEnd);
+  const lines = block.split("\n");
+  const isCollapsed = selectionStart === selectionEnd;
+  const nextLines = lines.map((line, index) => {
+    if (line.trim().length === 0) {
+      return isCollapsed ? formatter("", index, true) : line;
+    }
+
+    return formatter(line, index, isCollapsed);
+  });
+  const nextBlock = nextLines.join("\n");
   const nextValue =
-    value.slice(0, blockStart) + nextBlock + value.slice(selectionEnd);
+    value.slice(0, blockStart) + nextBlock + value.slice(blockEnd);
+
+  if (isCollapsed) {
+    const cursorOffset = nextLines.length > 0 ? nextLines[0].length : 0;
+    const nextSelection = blockStart + cursorOffset;
+
+    return {
+      value: nextValue,
+      selectionStart: nextSelection,
+      selectionEnd: nextSelection,
+    };
+  }
 
   return {
     value: nextValue,
@@ -847,8 +911,7 @@ const markdownToolbarItems = [
         value,
         selectionStart,
         selectionEnd,
-        (line) => `## ${line}`,
-        "Heading",
+        (line) => (line.trim().length > 0 ? `## ${line}` : "## "),
       ),
   },
   {
@@ -859,21 +922,31 @@ const markdownToolbarItems = [
         value,
         selectionStart,
         selectionEnd,
-        (line) => `- ${line}`,
-        "List item",
+        (line) => (line.trim().length > 0 ? `- ${line}` : "- "),
       ),
   },
   {
     label: "1. List",
     title: "Numbered list",
     insert: (value: string, selectionStart: number, selectionEnd: number) =>
-      prefixSelectedLines(
-        value,
-        selectionStart,
-        selectionEnd,
-        (_line, index) => `${index + 1}. ${_line}`,
-        "List item",
-      ),
+      (() => {
+        let itemNumber = 1;
+
+        return prefixSelectedLines(
+          value,
+          selectionStart,
+          selectionEnd,
+          (line) => {
+            if (line.trim().length === 0) {
+              return `${itemNumber}. `;
+            }
+
+            const formatted = `${itemNumber}. ${line}`;
+            itemNumber += 1;
+            return formatted;
+          },
+        );
+      })(),
   },
   {
     label: "Link",
@@ -909,8 +982,7 @@ const markdownToolbarItems = [
         value,
         selectionStart,
         selectionEnd,
-        (line) => `> ${line}`,
-        "Quoted text",
+        (line) => (line.trim().length > 0 ? `> ${line}` : "> "),
       ),
   },
   {

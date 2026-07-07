@@ -41,6 +41,7 @@ export function MarkdownContent({
           line-height: 1.8;
           overflow-wrap: anywhere;
           word-break: break-word;
+          white-space: pre-wrap;
         }
 
         .markdown-document > *:first-child {
@@ -137,6 +138,7 @@ export function MarkdownContent({
           border: 1px solid var(--border);
           border-radius: 10px;
           padding: 14px 16px;
+          white-space: pre;
         }
 
         .markdown-document pre code {
