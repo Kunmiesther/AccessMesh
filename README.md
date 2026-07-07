@@ -237,6 +237,34 @@ AccessMesh becomes the verification layer while applications remain responsible 
 
 ---
 
+## AccessMesh Intelligence
+
+AccessMesh Intelligence is the AI discovery layer inside AccessMesh.
+
+Instead of leaving published resources as a flat marketplace feed, AccessMesh Intelligence analyzes resources after publication and organizes them into useful discovery contexts. It generates resource summaries, identifies topics, estimates the intended audience, assigns placement labels, maps related resources, and groups premium knowledge into discovery collections.
+
+This gives the marketplace a more active discovery layer. A resource is not only published and listed; it can be understood, categorized, connected to similar resources, and surfaced where it is most relevant.
+
+> ![AccessMesh Landing](./public/images/accessmesh-intelligence.png)
+
+### What it does
+
+- Analyzes newly published resources using Gemini.
+- Generates concise resource summaries.
+- Identifies topics, audience, and category context.
+- Groups resources into discovery collections.
+- Maps related resources where relevant.
+- Adds AI-generated metadata to resource pages.
+- Enriches middleware payment responses with machine-readable resource context.
+
+### Why it matters
+
+AccessMesh Intelligence helps users and external clients discover premium knowledge faster. It also makes AccessMesh more useful for agentic workflows because protected resources can expose structured metadata before access is granted, allowing automated clients to understand what a resource is about before deciding whether it is relevant to their task.
+
+The intelligence layer is non-blocking. Publishing does not depend on Gemini succeeding, and AI failures do not prevent creators from publishing resources.
+
+---
+
 # AccessMesh Middleware
 
 The marketplace solves monetization for creators who want to publish directly on AccessMesh.
@@ -381,6 +409,7 @@ AccessMesh was built using technologies selected for reliability, developer expe
 | Styling | Tailwind CSS | Utility-first styling system for a consistent interface |
 | Database | PostgreSQL | Persistent storage for resources, users, purchases, and creator data |
 | ORM | Prisma | Type-safe database access and schema management |
+| AI | Gemini 2.5 Flash | Powers AccessMesh Intelligence for resource analysis, discovery collections, related-resource mapping, and machine-readable metadata generation |
 | Authentication | WebAuthn Passkeys | Passwordless authentication |
 | Wallet Infrastructure | Circle Programmable Wallets | Wallet creation and transaction signing |
 | Stablecoin | USDC | Native payment currency |
@@ -411,6 +440,14 @@ Payment infrastructure benefits significantly from strong typing. TypeScript red
 Ownership records, creator profiles, purchases, resources, and verification data require reliable persistence.
 
 Prisma provides a type-safe interface over PostgreSQL, making database interactions predictable while allowing the schema to evolve alongside the application.
+
+---
+
+### Gemini 2.5 Flash (AccessMesh Intelligence)
+
+AccessMesh Intelligence adds an AI-powered discovery layer to the marketplace without becoming part of the payment path. After a resource is successfully published, Gemini analyzes its content to generate structured metadata, including summaries, topics, intended audience, related resources, marketplace placement, and discovery collections.
+
+This metadata enriches the marketplace experience for users while also extending the middleware with machine-readable context that external applications and AI agents can consume before requesting paid access. Because analysis runs asynchronously, creators never have to wait for AI processing before their content becomes available.
 
 ---
 
