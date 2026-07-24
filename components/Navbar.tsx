@@ -46,6 +46,9 @@ export function Navbar() {
           <Link href="/explore" style={navLinkStyle}>
             Explore
           </Link>
+          <Link href="/agent" style={navLinkStyle}>
+            Research Agent
+          </Link>
           <Link href="/create" style={navLinkStyle}>
             Create
           </Link>

@@ -126,6 +126,15 @@ textarea {
   min-width: 0;
 }
 
+.agent-hero,
+.agent-layout,
+.agent-stack,
+.agent-goal-grid,
+.agent-sidebar,
+.agent-sticky {
+  min-width: 0;
+}
+
 .landing-hero-inner {
   width: 100%;
 }
@@ -232,6 +241,19 @@ textarea {
   .bridge-table-row-mobile > :last-child {
     text-align: left !important;
   }
+
+  .agent-hero,
+  .agent-layout {
+    grid-template-columns: 1fr !important;
+  }
+
+  .agent-goal-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .agent-sticky {
+    position: static !important;
+  }
 }
 
 @media (max-width: 640px) {
@@ -302,5 +324,18 @@ textarea {
 
   .resource-card-meta-mobile {
     grid-template-columns: 1fr !important;
+  }
+
+  .agent-hero,
+  .agent-layout {
+    grid-template-columns: 1fr !important;
+  }
+
+  .agent-goal-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .agent-sticky {
+    position: static !important;
   }
 }
