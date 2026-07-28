@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
+import { getAgentOwnerFromRequest } from "@/lib/auth/requireAgentOwner";
+import { getOwnedAgentExecution } from "@/lib/auth/requireOwnedAgentExecution";
 import { jsonError } from "@/lib/http";
+import { AgentExecutionRepository } from "@/services/agent/AgentExecutionRepository";
 import { getWalletFromRequest, InputError } from "@/lib/validation";
 import { unlockAccess } from "@/services/accessFlowService";
 
@@ -9,10 +12,34 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+    const owner = getAgentOwnerFromRequest(request);
+    const executionId = typeof body.executionId === "string" ? body.executionId : null;
+    const wallet = owner?.walletAddress ?? getWalletFromRequest(request);
+
+    if (executionId && !owner) {
+      return jsonError(401, "ACCESS_UNLOCK_UNAUTHORIZED", "authentication required");
+    }
+
+    const ownedExecution = executionId
+      ? await getOwnedAgentExecution(
+          request,
+          executionId,
+          new AgentExecutionRepository(),
+        )
+      : null;
+
+    if (executionId && !ownedExecution) {
+      return jsonError(404, "ACCESS_UNLOCK_NOT_FOUND", "execution not found");
+    }
+
+    if (ownedExecution) {
+      await new AgentExecutionRepository().markUnlocking(executionId);
+    }
+
     const result = await unlockAccess({
       accessId: body.accessId,
       txHash: body.txHash,
-      payerWallet: getWalletFromRequest(request),
+      payerWallet: wallet,
     });
 
     const status = result.ok
@@ -29,6 +56,25 @@ export async function POST(request: Request) {
         }
       : result;
     const response = NextResponse.json(responseBody, { status });
+
+    if (ownedExecution) {
+      const repository = new AgentExecutionRepository();
+      if (result.ok) {
+        await repository.completeExecution(executionId, {
+          transactionId: result.txHash ?? body.txHash,
+          amountUSDC: body.amountUSDC ?? null,
+          resourceId: body.resourceId ?? ownedExecution.execution.selectedResourceId ?? null,
+        });
+      } else if (result.verification.status === "FAILED") {
+        await repository.failExecution(executionId, {
+          code: "UNLOCK_FAILED",
+          message:
+            result.verification.reason ??
+            "The access unlock could not be completed.",
+          stage: "UNLOCKING",
+        });
+      }
+    }
 
     if (result.ok && result.accessToken) {
       response.cookies.set({

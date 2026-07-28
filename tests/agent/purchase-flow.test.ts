@@ -216,30 +216,137 @@ test("executes the trusted payment and unlock path on success", async () => {
   }
 });
 
+test("purchase flow carries the executionId through trusted lifecycle writes", async () => {
+  const calls: Array<{
+    url: string;
+    body: unknown;
+  }> = [];
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input.toString();
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+    calls.push({ url, body });
+
+    if (url.includes("/api/agent/executions/execution-1/payment-submitted")) {
+      return new Response(JSON.stringify({ ok: true, execution: { id: "execution-1" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+
+    if (url.includes("/api/agent/executions/execution-1/settlement-verification")) {
+      return new Response(JSON.stringify({ ok: true, execution: { id: "execution-1" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+
+    if (url.includes("/api/access/unlock")) {
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          access: "UNLOCKED",
+          expiresAt: "2026-07-24T02:00:00.000Z",
+          resourceId: selectedResourceId,
+          resource: accessIntent.resource,
+          txHash: "0xbbbb",
+          purchase: {
+            id: "purchase-1",
+            resourceId: selectedResourceId,
+            resourceTitle: selectedResourceTitle,
+            buyerWallet: walletAddress,
+            creatorWallet: walletAddress,
+            amountUSDC: 0.2,
+            txHash: "0xbbbb",
+            creatorDisplayName: null,
+            timestamp: "2026-07-24T00:00:00.000Z",
+          },
+          verification: {
+            status: "SETTLED",
+            settled: true,
+            txHash: "0xbbbb",
+          },
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      );
+    }
+
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  try {
+    const outcome = await executeAgentPurchaseFlow({
+      result,
+      policy,
+      walletAddress,
+      bundlerClient: { account: { address: walletAddress } } as never,
+      accessIntent: accessIntent as never,
+      executionId: "execution-1",
+      submitPayment: async () => "0xaaaa" as never,
+      confirmPayment: async () => ({
+        status: "confirmed",
+        userOpHash: "0xaaaa",
+        transactionHash: "0xbbbb",
+      }) as never,
+    });
+
+    assert.equal(outcome.ok, true);
+    assert.ok(calls.some((call) => call.url.includes("/api/agent/executions/execution-1/payment-submitted")));
+    assert.ok(calls.some((call) => call.url.includes("/api/agent/executions/execution-1/settlement-verification")));
+
+    const unlockCall = calls.find((call) => call.url.includes("/api/access/unlock"));
+    assert.ok(unlockCall);
+    assert.equal((unlockCall?.body as { executionId?: string | null } | null)?.executionId, "execution-1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("payment rejection does not reach unlock success", async () => {
-  let unlocked = 0;
+  const calls: string[] = [];
+  const originalFetch = globalThis.fetch;
 
-  const outcome = await executeAgentPurchaseFlow({
-    result,
-    policy,
-    walletAddress,
-    bundlerClient: { account: { address: walletAddress } } as never,
-    accessIntent: accessIntent as never,
-    submitPayment: async () => {
-      throw new Error("wallet approval rejected");
-    },
-    unlockResource: async () => {
-      unlocked += 1;
-      return {
-        ok: true,
-      } as never;
-    },
-  });
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input.toString();
+    calls.push(url);
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
 
-  assert.equal(outcome.ok, false);
-  assert.equal(unlocked, 0);
-  if (!outcome.ok) {
-    assert.equal(outcome.reason, "APPROVAL_REJECTED");
+  try {
+    const outcome = await executeAgentPurchaseFlow({
+      result,
+      policy,
+      walletAddress,
+      bundlerClient: { account: { address: walletAddress } } as never,
+      accessIntent: accessIntent as never,
+      executionId: "execution-1",
+      submitPayment: async () => {
+        throw new Error("wallet approval rejected");
+      },
+    });
+
+    assert.equal(outcome.ok, false);
+    assert.ok(calls.some((url) => url.includes("/api/agent/executions/execution-1/cancel-approval")));
+    assert.equal(
+      calls.some((url) => url.includes("/api/agent/executions/execution-1/payment-submitted")),
+      false,
+    );
+    assert.equal(calls.some((url) => url.includes("/api/access/unlock")), false);
+    if (!outcome.ok) {
+      assert.equal(outcome.reason, "APPROVAL_REJECTED");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 

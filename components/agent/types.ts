@@ -47,6 +47,7 @@ export type AgentCandidateEvaluationView = {
 };
 
 export type AgentRuntimeResultView = {
+  executionId?: string | null;
   goal: AgentGoalPlan;
   decision: AgentDecision;
   selectedResource: AgentResourceCandidateView | null;
@@ -71,6 +72,7 @@ export type AgentPurchaseCompletionView = {
 
 export type AgentRunApiSuccess = {
   ok: true;
+  executionId: string | null;
   result: AgentRuntimeResultView;
 };
 

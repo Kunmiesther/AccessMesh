@@ -21,6 +21,54 @@ import type {
   UnlockRequest,
   UnlockResponse,
 } from "@/types";
+import type { AuthenticatedOwner } from "@/lib/auth/agentOwnerSession";
+
+export type AgentExecutionReadResponse = {
+  ok: true;
+  execution: {
+    id: string;
+    status: string;
+    goal: unknown;
+    decision: string | null;
+    policy: unknown;
+    normalizedGoal: string | null;
+    candidateCount: number;
+    comparisonSummary: unknown;
+    selectedResource: unknown;
+    selectedEvaluation: unknown;
+    candidates: unknown[];
+    trace: unknown[];
+    purchase: {
+      status: string;
+      amountUSDC: number | null;
+      transactionId: string | null;
+      resourceId: string | null;
+      settlementVerified: boolean;
+      settlementStatus: string;
+      unlocked: boolean;
+      unlockStatus: string;
+    } | null;
+    createdAt: string;
+    completedAt: string | null;
+  };
+};
+
+export type AgentExecutionWriteResponse = {
+  ok: true;
+  execution: unknown;
+};
+
+export type AgentOwnerSessionResponse =
+  | {
+      ok: true;
+      authenticated: true;
+      owner: AuthenticatedOwner;
+    }
+  | {
+      ok: true;
+      authenticated: false;
+      owner: null;
+    };
 
 async function apiFetch<T>(
   path: string,
@@ -89,7 +137,7 @@ export async function getAccessIntent(
 
 // POST /api/access/unlock
 export async function postUnlock(
-  body: UnlockRequest,
+  body: UnlockRequest & { executionId?: string | null },
   opts?: { wallet?: string },
 ): Promise<UnlockResponse> {
   return apiFetch<UnlockResponse>("/api/access/unlock", {
@@ -100,6 +148,80 @@ export async function postUnlock(
     },
     body: JSON.stringify(body),
   });
+}
+
+export async function getAgentExecution(
+  executionId: string,
+): Promise<AgentExecutionReadResponse> {
+  return apiFetch<AgentExecutionReadResponse>(`/api/agent/executions/${executionId}`);
+}
+
+export async function postAgentExecutionBeginApproval(
+  executionId: string,
+): Promise<AgentExecutionWriteResponse> {
+  return apiFetch<AgentExecutionWriteResponse>(
+    `/api/agent/executions/${executionId}/begin-approval`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export async function postAgentExecutionCancelApproval(
+  executionId: string,
+): Promise<AgentExecutionWriteResponse> {
+  return apiFetch<AgentExecutionWriteResponse>(
+    `/api/agent/executions/${executionId}/cancel-approval`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export async function postAgentExecutionPaymentSubmitted(
+  executionId: string,
+  body: {
+    transactionId: string;
+    amountUSDC: number;
+    resourceId: string;
+    resourceTitle: string;
+  },
+): Promise<AgentExecutionWriteResponse> {
+  return apiFetch<AgentExecutionWriteResponse>(
+    `/api/agent/executions/${executionId}/payment-submitted`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function postAgentExecutionSettlementVerification(
+  executionId: string,
+): Promise<AgentExecutionWriteResponse> {
+  return apiFetch<AgentExecutionWriteResponse>(
+    `/api/agent/executions/${executionId}/settlement-verification`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export async function postAgentExecutionFailure(
+  executionId: string,
+  body: {
+    code: string;
+    message: string;
+    stage?: string;
+  },
+): Promise<AgentExecutionWriteResponse> {
+  return apiFetch<AgentExecutionWriteResponse>(
+    `/api/agent/executions/${executionId}/failure`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
 }
 
 export async function postCctpBridgeEvent(

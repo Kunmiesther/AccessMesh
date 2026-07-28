@@ -38,6 +38,7 @@ export type CandidateEvaluation = {
 };
 
 export type AgentRuntimeResult = {
+  executionId?: string | null;
   goal: AgentGoalPlan;
   decision: AgentDecision;
   selectedResource: AgentResourceCandidate | null;

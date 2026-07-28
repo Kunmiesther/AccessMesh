@@ -1,6 +1,12 @@
 import { type Address, type Hash } from "viem";
 import { arcExplorerTxUrl } from "@/lib/ui";
-import { postUnlock } from "@/lib/api";
+import {
+  postAgentExecutionFailure,
+  postAgentExecutionCancelApproval,
+  postAgentExecutionPaymentSubmitted,
+  postAgentExecutionSettlementVerification,
+  postUnlock,
+} from "@/lib/api";
 import {
   confirmUsdcPayment,
   submitUsdcPayment,
@@ -65,6 +71,7 @@ export type AgentPurchaseFlowInput = {
   walletAddress: Address | null;
   bundlerClient: UsdcBundlerClient | null;
   accessIntent: PaymentIntent | null;
+  executionId?: string | null;
   onStage?: (stage: AgentPurchaseStageUpdate) => void;
   submitPayment?: typeof submitUsdcPayment;
   confirmPayment?: typeof confirmUsdcPayment;
@@ -179,6 +186,8 @@ export async function executeAgentPurchaseFlow(
   >;
   const accessIntent = params.accessIntent as PaymentIntent;
   const bundlerClient = params.bundlerClient;
+  let paymentSubmitted = false;
+  let currentStage: AgentPurchaseStage = "REVIEWING";
 
   if (!bundlerClient || !bundlerClient.account) {
     return fail(
@@ -188,10 +197,12 @@ export async function executeAgentPurchaseFlow(
   }
 
   try {
+    currentStage = "PREPARING_PAYMENT";
     params.onStage?.({
       phase: "PREPARING_PAYMENT",
       message: "Preparing payment transfers.",
     });
+    currentStage = "SUBMITTING_PAYMENT";
     params.onStage?.({
       phase: "SUBMITTING_PAYMENT",
       message: "Submitting the Arc payment.",
@@ -210,17 +221,33 @@ export async function executeAgentPurchaseFlow(
         },
       ],
     });
+    paymentSubmitted = true;
 
+    if (params.executionId) {
+      await postAgentExecutionPaymentSubmitted(params.executionId, {
+        transactionId: userOpHash,
+        amountUSDC: accessIntent.amountUSDC,
+        resourceId: selectedResource.id,
+        resourceTitle: selectedResource.title,
+      });
+    }
+
+    currentStage = "VERIFYING_SETTLEMENT";
     params.onStage?.({
       phase: "VERIFYING_SETTLEMENT",
       message: "Waiting for settlement confirmation.",
     });
+
+    if (params.executionId) {
+      await postAgentExecutionSettlementVerification(params.executionId);
+    }
 
     const confirmation = await (params.confirmPayment ?? confirmUsdcPayment)({
       bundlerClient,
       userOpHash,
     });
 
+    currentStage = "UNLOCKING_RESOURCE";
     params.onStage?.({
       phase: "UNLOCKING_RESOURCE",
       message: "Confirming the resource unlock.",
@@ -230,6 +257,7 @@ export async function executeAgentPurchaseFlow(
       {
         accessId: accessIntent.accessId,
         txHash: confirmation.transactionHash,
+        executionId: params.executionId ?? null,
       },
       { wallet: params.walletAddress ?? undefined },
     );
@@ -268,6 +296,20 @@ export async function executeAgentPurchaseFlow(
       unlock: unlockResponse,
     };
   } catch (error) {
+    if (params.executionId) {
+      const failure = classifyPurchaseError(error);
+
+      if (!paymentSubmitted && failure === "APPROVAL_REJECTED") {
+        await postAgentExecutionCancelApproval(params.executionId).catch(() => {});
+      } else if (paymentSubmitted || failure !== "APPROVAL_REJECTED") {
+        await postAgentExecutionFailure(params.executionId, {
+          code: failure,
+          message: getPurchaseErrorMessage(error),
+          stage: currentStage,
+        }).catch(() => {});
+      }
+    }
+
     return fail(
       classifyPurchaseError(error),
       getPurchaseErrorMessage(error),

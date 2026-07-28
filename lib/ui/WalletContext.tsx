@@ -87,8 +87,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setError(null);
 
     restoreWalletSession(stored)
-      .then(async (session) => {
-        await restoreWalletIdentity(session.address);
+      .then((session) => {
         if (cancelled) {
           return;
         }
@@ -135,7 +134,6 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
     try {
       const session = await initWallet(username, options);
-      await restoreWalletIdentity(session.address);
       setSession(session);
       storeWalletSession(session);
       setReady(true);
@@ -179,16 +177,4 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
 export function useWallet() {
   return useContext(WalletContext);
-}
-
-async function restoreWalletIdentity(wallet: string) {
-  const response = await fetch("/api/wallet/identity", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ wallet }),
-  });
-
-  if (!response.ok) {
-    throw new Error("Wallet identity could not be restored.");
-  }
 }

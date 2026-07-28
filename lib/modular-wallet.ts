@@ -245,6 +245,18 @@ export async function restoreWalletSession(stored: StoredWalletSession) {
   return session;
 }
 
+export async function authenticateStoredWalletSession(stored: StoredWalletSession) {
+  const { clientKey, clientUrl } = getClientEnv();
+  const transport = toPasskeyTransport(clientUrl, clientKey);
+
+  return toWebAuthnCredential({
+    transport,
+    username: stored.username,
+    credentialId: stored.credentialId,
+    mode: WebAuthnMode.Login,
+  });
+}
+
 async function createWalletSession(params: {
   username: string;
   clientKey: string;

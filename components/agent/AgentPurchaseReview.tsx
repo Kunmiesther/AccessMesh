@@ -13,6 +13,10 @@ import {
   type AgentPurchaseStage,
   validateAgentPurchaseBinding,
 } from "@/services/agent/AgentPurchaseFlow";
+import {
+  postAgentExecutionBeginApproval,
+  postAgentExecutionCancelApproval,
+} from "@/lib/api";
 
 const PURCHASE_STAGES: AgentPurchaseStage[] = [
   "REVIEWING",
@@ -70,6 +74,14 @@ export function AgentPurchaseReview({
     stage,
     error,
   });
+
+  async function beginApproval(executionId: string) {
+    await postAgentExecutionBeginApproval(executionId);
+  }
+
+  async function cancelApproval(executionId: string) {
+    await postAgentExecutionCancelApproval(executionId);
+  }
 
   useEffect(() => {
     if (!open) {
@@ -138,6 +150,10 @@ export function AgentPurchaseReview({
           return;
         }
 
+        if (activeResult?.executionId) {
+          await beginApproval(activeResult.executionId);
+        }
+
         setPreviewIntent(response.paymentIntent);
         setStage("AWAITING_APPROVAL");
       } catch (previewError) {
@@ -200,6 +216,7 @@ export function AgentPurchaseReview({
         walletAddress: activeAddress,
         bundlerClient,
         accessIntent: liveIntentResponse.paymentIntent,
+        executionId: activeResult?.executionId ?? null,
         onStage: ({ phase, message }) => {
           setStage(phase);
         },
@@ -225,6 +242,14 @@ export function AgentPurchaseReview({
       setIsSubmitting(false);
       inFlightRef.current = false;
     }
+  }
+
+  async function handleClose() {
+    if (stage === "AWAITING_APPROVAL" && result?.executionId) {
+      await cancelApproval(result.executionId).catch(() => {});
+    }
+
+    onClose();
   }
 
   if (!open) {
@@ -256,7 +281,7 @@ export function AgentPurchaseReview({
             </p>
           </div>
 
-          <button type="button" onClick={onClose} disabled={isSubmitting} style={closeButtonStyle}>
+          <button type="button" onClick={handleClose} disabled={isSubmitting} style={closeButtonStyle}>
             Close
           </button>
         </div>
@@ -345,7 +370,7 @@ export function AgentPurchaseReview({
 
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             disabled={isSubmitting}
             style={secondaryButtonStyle}
           >

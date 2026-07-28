@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { requireAgentOwner, UnauthorizedAgentOwnerError } from "@/lib/auth/requireAgentOwner";
 import { InputError } from "@/lib/validation";
+import { AgentExecutionRepository } from "@/services/agent/AgentExecutionRepository";
 import { runAgentApplication } from "@/services/agent/AgentApplicationService";
 import type { AgentApplicationInput } from "@/services/agent/AgentApplicationService";
 
@@ -13,15 +15,22 @@ export async function POST(request: Request) {
 export async function handleAgentRunRequest(
   request: Request,
   runApplication = runAgentApplication,
+  getOwner = requireAgentOwner,
 ) {
   try {
     const body = await parseJsonBody(request);
     const input = parseAgentRunInput(body);
-    const result = await runApplication(input);
+    const owner = getOwner(request);
+    const result = await runApplication(input, {
+      executionRepository: new AgentExecutionRepository(),
+      ownerId: owner.ownerId,
+    });
+    const { executionId = null, ...runtimeResult } = result;
 
     return NextResponse.json({
       ok: true,
-      result,
+      executionId,
+      result: runtimeResult,
     });
   } catch (error) {
     if (error instanceof InputError) {
@@ -31,6 +40,16 @@ export async function handleAgentRunRequest(
           error: error.message,
         },
         { status: 400 },
+      );
+    }
+
+    if (error instanceof UnauthorizedAgentOwnerError) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "authentication required",
+        },
+        { status: 401 },
       );
     }
 

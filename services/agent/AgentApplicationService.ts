@@ -4,8 +4,21 @@ import { listAgentMarketplaceCandidates } from "@/services/agent/AgentMarketplac
 import type {
   AgentBudgetPolicy,
   AgentRuntimeResult,
+  AgentResourceCandidate,
 } from "@/services/agent/types";
-import type { AgentResourceCandidate } from "@/services/agent/types";
+import type { CandidateEvaluation } from "@/services/agent/types";
+import {
+  buildCandidateComparisonSummary,
+  toSerializableCandidateEvaluationSnapshot,
+  toSerializableResourceSnapshot,
+} from "./AgentExecutionSerialization";
+import type { AgentExecutionRepository } from "./AgentExecutionRepository";
+import type {
+  AgentExecutionRecord,
+  SerializableGoalSnapshot,
+  SerializablePolicySnapshot,
+  SerializableTraceEntry,
+} from "./AgentExecutionTypes";
 
 export type AgentApplicationInput = {
   goal: string;
@@ -13,28 +26,118 @@ export type AgentApplicationInput = {
   resourceLimit?: number;
 };
 
+export type AgentApplicationResult = AgentRuntimeResult & {
+  executionId: string | null;
+};
+
 type AgentApplicationDeps = {
   loadCandidates?: typeof listAgentMarketplaceCandidates;
   runRuntime?: typeof runAgentRuntime;
+  executionRepository?: AgentExecutionRepository;
+  ownerId?: string | null;
 };
 
 export async function runAgentApplication(
   input: AgentApplicationInput,
   deps: AgentApplicationDeps = {},
-): Promise<AgentRuntimeResult> {
+): Promise<AgentApplicationResult> {
   const goal = normalizeGoal(input.goal);
   const policy = validatePolicy(input.policy);
   const loadCandidates = deps.loadCandidates ?? listAgentMarketplaceCandidates;
   const runRuntime = deps.runRuntime ?? runAgentRuntime;
-  const resources = await loadCandidates({
-    limit: input.resourceLimit,
-  });
+  const persistence = deps.executionRepository && deps.ownerId
+    ? {
+        executionRepository: deps.executionRepository,
+        ownerId: deps.ownerId,
+      }
+    : null;
 
-  return runRuntime({
-    goal,
-    policy,
-    resources: resources.map(cloneCandidate),
-  });
+  let executionId: string | null = null;
+
+  try {
+    const execution = persistence
+      ? await createExecutionRecord(persistence.executionRepository, {
+          ownerId: persistence.ownerId,
+          goal: toSerializableGoalSnapshot(goal),
+          policySnapshot: toSerializablePolicySnapshot(policy),
+          normalizedGoal: goal,
+          candidateCount: 0,
+          trace: [],
+        }).catch((error) => {
+          console.warn("agent execution persistence failed during create", {
+            message: error instanceof Error ? error.message : String(error),
+          });
+          return null;
+        })
+      : null;
+
+    executionId = execution?.id ?? null;
+
+    if (executionId && persistence) {
+      await persistence.executionRepository.markExecutionRunning(executionId).catch((error) => {
+        console.warn("agent execution persistence failed during running state", {
+          message: error instanceof Error ? error.message : String(error),
+        });
+        executionId = null;
+      });
+    }
+
+    const resources = await loadCandidates({
+      limit: input.resourceLimit,
+    });
+
+    const result = runRuntime({
+      goal,
+      policy,
+      resources: resources.map(cloneCandidate),
+    });
+
+    if (executionId && persistence) {
+      await persistence.executionRepository
+        .recordRecommendation(executionId, {
+          decision: result.decision,
+          candidateCount: result.candidates.length,
+          comparisonSummary: buildCandidateComparisonSummary({
+            candidates: result.candidates,
+            selectedResourceId: result.selectedResource?.id ?? null,
+          }),
+          candidateSummaries: result.candidates.map(toSerializableCandidateEvaluationSnapshot),
+          selectedResource: result.selectedResource
+            ? toSerializableResourceSnapshot(result.selectedResource)
+            : null,
+          selectedEvaluation: result.selectedEvaluation
+            ? toSerializableCandidateEvaluationSnapshot(result.selectedEvaluation)
+            : null,
+          trace: result.trace as readonly SerializableTraceEntry[],
+          estimatedCostUSDC: result.selectedResource?.priceUSDC ?? null,
+        })
+        .catch((error) => {
+          console.warn("agent execution persistence failed during recommendation", {
+            message: error instanceof Error ? error.message : String(error),
+          });
+          executionId = null;
+        });
+    }
+
+    return {
+      ...result,
+      executionId,
+    };
+  } catch (error) {
+    if (executionId && persistence) {
+      await persistence.executionRepository.failExecution(executionId, {
+        code: classifyAgentExecutionFailure(error),
+        message: getSafeErrorMessage(error),
+        stage: "RUNNING",
+      }).catch((persistError) => {
+        console.warn("agent execution persistence failed during failure recording", {
+          message: persistError instanceof Error ? persistError.message : String(persistError),
+        });
+      });
+    }
+
+    throw error;
+  }
 }
 
 function normalizeGoal(goal: string) {
@@ -82,6 +185,20 @@ function validatePolicy(policy: AgentBudgetPolicy): AgentBudgetPolicy {
   };
 }
 
+async function createExecutionRecord(
+  repository: AgentExecutionRepository,
+  input: {
+    ownerId: string;
+    goal: SerializableGoalSnapshot;
+    policySnapshot: SerializablePolicySnapshot;
+    normalizedGoal: string;
+    candidateCount: number;
+    trace: readonly SerializableTraceEntry[];
+  },
+): Promise<AgentExecutionRecord> {
+  return repository.createExecution(input);
+}
+
 function assertFiniteNumber(value: unknown, field: string) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new InputError(`${field} must be a number`);
@@ -95,4 +212,47 @@ function cloneCandidate(resource: AgentResourceCandidate): AgentResourceCandidat
     ...resource,
     aiTopics: [...resource.aiTopics],
   };
+}
+
+function toSerializableGoalSnapshot(goal: string): SerializableGoalSnapshot {
+  return {
+    originalGoal: goal,
+    normalizedQuery: goal.toLowerCase(),
+    keywords: goal
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean),
+  };
+}
+
+function toSerializablePolicySnapshot(
+  policy: AgentBudgetPolicy,
+): SerializablePolicySnapshot {
+  return {
+    remainingBudgetUSDC: policy.remainingBudgetUSDC,
+    maxPurchaseUSDC: policy.maxPurchaseUSDC,
+    minimumMatchScore: policy.minimumMatchScore,
+  };
+}
+
+function classifyAgentExecutionFailure(error: unknown) {
+  const message = getSafeErrorMessage(error).toLowerCase();
+
+  if (/marketplace|resource|candidate/.test(message)) {
+    return "MARKETPLACE_FAILURE";
+  }
+
+  if (/runtime|recommendation|goal/.test(message)) {
+    return "RUNTIME_FAILURE";
+  }
+
+  return "UNKNOWN_FAILURE";
+}
+
+function getSafeErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "The agent execution could not be completed.";
 }

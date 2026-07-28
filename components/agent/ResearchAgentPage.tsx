@@ -17,6 +17,7 @@ import {
   validateAgentComposerFields,
 } from "./agentUi";
 import type { AgentPurchaseCompletionView, AgentRuntimeResultView } from "./types";
+import { useAgentOwnerSession } from "@/hooks/useAgentOwnerSession";
 
 const DEFAULT_ERROR = "The agent request could not be completed.";
 
@@ -32,6 +33,7 @@ export function ResearchAgentPage() {
   const [purchaseCompletion, setPurchaseCompletion] =
     useState<AgentPurchaseCompletionView | null>(null);
   const selectedCandidateRef = useRef<HTMLDivElement | null>(null);
+  const { ensureAgentOwnerSession } = useAgentOwnerSession();
 
   const validation = useMemo(() => validateAgentComposerFields(values), [values]);
 
@@ -67,8 +69,10 @@ export function ResearchAgentPage() {
       return;
     }
 
-    setIsRunning(true);
     try {
+      await ensureAgentOwnerSession();
+      setIsRunning(true);
+
       const response = await fetch("/api/agent/run", {
         method: "POST",
         headers: {
@@ -97,7 +101,10 @@ export function ResearchAgentPage() {
         throw new Error(parsed.ok ? DEFAULT_ERROR : parsed.error);
       }
 
-      setResult(parsed.result);
+      setResult({
+        ...parsed.result,
+        executionId: parsed.executionId,
+      });
       setSubmittedPolicy(validation.policy);
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : DEFAULT_ERROR);

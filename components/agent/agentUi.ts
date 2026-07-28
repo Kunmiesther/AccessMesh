@@ -141,8 +141,16 @@ export function sanitizeAgentRunResponse(
     return null;
   }
 
+  const executionId =
+    typeof input.executionId === "string" && input.executionId.trim().length > 0
+      ? input.executionId
+      : input.executionId === null
+        ? null
+        : null;
+
   return {
     ok: true,
+    executionId,
     result,
   };
 }
@@ -160,12 +168,19 @@ export function sanitizeRuntimeResult(
   const selectedResource = sanitizeResourceCandidate(input.selectedResource);
   const selectedEvaluation = sanitizeCandidateEvaluation(input.selectedEvaluation);
   const trace = sanitizeTrace(input.trace);
+  const executionId =
+    typeof input.executionId === "string" && input.executionId.trim().length > 0
+      ? input.executionId
+      : input.executionId === null
+        ? null
+        : undefined;
 
   if (!goal || !decision || !trace) {
     return null;
   }
 
   return {
+    ...(executionId !== undefined ? { executionId } : {}),
     goal,
     decision,
     selectedResource,
