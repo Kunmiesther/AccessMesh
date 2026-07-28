@@ -44,6 +44,9 @@ export function AgentExecutionDetailPanel({
           <Link href="/agent/history" style={secondaryLinkStyle}>
             Back to history
           </Link>
+          <Link href="/agent/analytics" style={secondaryLinkStyle}>
+            View analytics
+          </Link>
           <Link href="/agent" style={primaryLinkStyle}>
             Open Research Agent
           </Link>

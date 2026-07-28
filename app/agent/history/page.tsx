@@ -46,6 +46,9 @@ export default async function AgentHistoryPage({
               <Link href="/agent" style={primaryLinkStyle}>
                 Run Research Agent
               </Link>
+              <Link href="/agent/analytics" style={secondaryLinkStyle}>
+                View analytics
+              </Link>
             </div>
           </div>
         </header>
@@ -191,6 +194,21 @@ const primaryLinkStyle = {
   border: "1px solid var(--accent)",
   background: "var(--accent)",
   color: "#000",
+  padding: "11px 14px",
+  textDecoration: "none",
+  fontFamily: "var(--font-mono)",
+  fontSize: 12,
+  fontWeight: 700,
+} as const;
+
+const secondaryLinkStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  borderRadius: 12,
+  border: "1px solid var(--border)",
+  background: "rgba(255,255,255,0.03)",
+  color: "var(--text-secondary)",
   padding: "11px 14px",
   textDecoration: "none",
   fontFamily: "var(--font-mono)",

@@ -49,6 +49,12 @@ export function Navbar() {
           <Link href="/agent" style={navLinkStyle}>
             Research Agent
           </Link>
+          <Link href="/agent/history" style={navLinkStyle}>
+            History
+          </Link>
+          <Link href="/agent/analytics" style={navLinkStyle}>
+            Analytics
+          </Link>
           <Link href="/create" style={navLinkStyle}>
             Create
           </Link>

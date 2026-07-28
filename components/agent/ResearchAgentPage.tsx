@@ -165,6 +165,9 @@ export function ResearchAgentPage() {
               <Link href="/agent/history" style={secondaryActionButtonStyle}>
                 View agent history
               </Link>
+              <Link href="/agent/analytics" style={secondaryActionButtonStyle}>
+                View analytics
+              </Link>
             </div>
           </div>
 
