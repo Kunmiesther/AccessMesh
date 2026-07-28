@@ -1,16 +1,19 @@
+import Link from "next/link";
 import { formatUSDC } from "@/lib/ui";
 import { deriveSkipReasons, formatBuyAgentResult, formatSkipAgentResult } from "./agentUi";
 import type { AgentBudgetPolicy } from "@/services/agent/types";
-import type { AgentRuntimeResultView } from "./types";
+import type { AgentPurchaseCompletionView, AgentRuntimeResultView } from "./types";
 
 export function AgentResultSummary({
   result,
   policy,
   onReviewPurchase,
+  purchaseCompletion,
 }: {
   result: AgentRuntimeResultView;
   policy: AgentBudgetPolicy;
   onReviewPurchase?: () => void;
+  purchaseCompletion?: AgentPurchaseCompletionView | null;
 }) {
   const isBuy = result.decision === "BUY";
   const summary = isBuy
@@ -79,13 +82,44 @@ export function AgentResultSummary({
             </ul>
           </div>
 
+          {purchaseCompletion ? (
+            <div style={completionStyle}>
+              <p style={fieldLabelStyle}>Purchase complete</p>
+              <div style={summaryStatsStyle}>
+                <SummaryStat
+                  label="Amount paid"
+                  value={formatUSDC(purchaseCompletion.amountUSDC)}
+                />
+                <SummaryStat
+                  label="Settlement"
+                  value={purchaseCompletion.settlementStatus}
+                />
+                <SummaryStat
+                  label="Unlocked"
+                  value={purchaseCompletion.unlocked ? "Confirmed" : "Pending"}
+                />
+              </div>
+            </div>
+          ) : null}
+
           <div style={footerStyle}>
             <p style={helperStyle}>
-              This is a recommendation only. No payment has been executed.
+              {purchaseCompletion
+                ? "Purchase complete. The selected resource is now unlocked."
+                : "This is a recommendation only. No payment has been executed."}
             </p>
-            <button type="button" onClick={onReviewPurchase} style={buttonStyle}>
-              Review purchase
-            </button>
+            {purchaseCompletion ? (
+              <Link
+                href={`/resource/${purchaseCompletion.resourceId}`}
+                style={buttonStyle}
+              >
+                Open unlocked resource
+              </Link>
+            ) : (
+              <button type="button" onClick={onReviewPurchase} style={buttonStyle}>
+                Review purchase
+              </button>
+            )}
           </div>
         </div>
       ) : (
@@ -296,6 +330,15 @@ const footerStyle = {
   justifyContent: "space-between",
   gap: 16,
   flexWrap: "wrap",
+} as const;
+
+const completionStyle = {
+  borderRadius: 14,
+  border: "1px solid rgba(76,175,125,0.18)",
+  background: "rgba(76,175,125,0.06)",
+  padding: 14,
+  display: "grid",
+  gap: 10,
 } as const;
 
 const buttonStyle = {

@@ -9,13 +9,14 @@ import { AgentBudgetCard } from "./AgentBudgetCard";
 import { AgentResultSummary } from "./AgentResultSummary";
 import { CandidateComparison } from "./CandidateComparison";
 import { DecisionTimeline } from "./DecisionTimeline";
+import { AgentPurchaseReview } from "./AgentPurchaseReview";
 import {
+  canReviewAgentPurchase,
   getSelectedCandidateId,
-  reviewSelectedCandidate,
   sanitizeAgentRunResponse,
   validateAgentComposerFields,
 } from "./agentUi";
-import type { AgentRuntimeResultView } from "./types";
+import type { AgentPurchaseCompletionView, AgentRuntimeResultView } from "./types";
 
 const DEFAULT_ERROR = "The agent request could not be completed.";
 
@@ -27,6 +28,9 @@ export function ResearchAgentPage() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AgentRuntimeResultView | null>(null);
   const [submittedPolicy, setSubmittedPolicy] = useState<AgentBudgetPolicy | null>(null);
+  const [purchaseReviewOpen, setPurchaseReviewOpen] = useState(false);
+  const [purchaseCompletion, setPurchaseCompletion] =
+    useState<AgentPurchaseCompletionView | null>(null);
   const selectedCandidateRef = useRef<HTMLDivElement | null>(null);
 
   const validation = useMemo(() => validateAgentComposerFields(values), [values]);
@@ -54,6 +58,8 @@ export function ResearchAgentPage() {
     event.preventDefault();
     setSubmitted(true);
     setError(null);
+    setPurchaseReviewOpen(false);
+    setPurchaseCompletion(null);
 
     if (!validation.ok) {
       setResult(null);
@@ -109,6 +115,22 @@ export function ResearchAgentPage() {
       [field]: value,
     }));
     setError(null);
+  }
+
+  function handleOpenReview() {
+    if (!canReviewAgentPurchase(result)) {
+      return;
+    }
+
+    setPurchaseReviewOpen(true);
+  }
+
+  function handleCloseReview() {
+    setPurchaseReviewOpen(false);
+  }
+
+  function handlePurchaseComplete(completion: AgentPurchaseCompletionView) {
+    setPurchaseCompletion(completion);
   }
 
   const stageLabel = AGENT_LOADING_STAGES[stageIndex];
@@ -196,7 +218,8 @@ export function ResearchAgentPage() {
               <AgentResultSummary
                 result={result}
                 policy={submittedPolicy}
-                onReviewPurchase={() => reviewSelectedCandidate(selectedCandidateRef.current)}
+                onReviewPurchase={handleOpenReview}
+                purchaseCompletion={purchaseCompletion}
               />
             ) : (
               <section style={emptyResultStyle}>
@@ -252,6 +275,14 @@ export function ResearchAgentPage() {
             </div>
           </aside>
         </div>
+
+        <AgentPurchaseReview
+          open={purchaseReviewOpen}
+          result={result}
+          policy={submittedPolicy}
+          onClose={handleCloseReview}
+          onPurchaseComplete={handlePurchaseComplete}
+        />
       </main>
     </div>
   );

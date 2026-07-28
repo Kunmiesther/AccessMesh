@@ -299,6 +299,47 @@ export function reviewSelectedCandidate(
   target?.scrollIntoView?.({ behavior: "smooth", block: "start" });
 }
 
+export function canReviewAgentPurchase(
+  result: AgentRuntimeResultView | null,
+) {
+  return Boolean(
+    result &&
+      result.decision === "BUY" &&
+      result.selectedResource &&
+      result.selectedEvaluation &&
+      result.selectedEvaluation.budgetEligible,
+  );
+}
+
+export function canApproveAgentPurchaseReview(params: {
+  ready: boolean;
+  connected: boolean;
+  address: string | null;
+  bundlerClient: unknown | null;
+  result: AgentRuntimeResultView | null;
+  policy: AgentBudgetPolicy | null;
+  previewIntentLoaded: boolean;
+  isSubmitting: boolean;
+  previewLoading: boolean;
+  stage: string;
+  error: string | null;
+}) {
+  return Boolean(
+    params.ready &&
+      params.connected &&
+      params.address &&
+      params.bundlerClient &&
+      params.result &&
+      params.policy &&
+      params.previewIntentLoaded &&
+      !params.previewLoading &&
+      !params.isSubmitting &&
+      !params.error &&
+      params.stage !== "FAILED" &&
+      params.stage !== "COMPLETED",
+  );
+}
+
 export function getCandidateStatusLabel(candidate: AgentCandidateEvaluationView) {
   return candidate.budgetEligible ? "Budget eligible" : "Over budget";
 }

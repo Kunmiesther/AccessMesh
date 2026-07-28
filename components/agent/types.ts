@@ -59,6 +59,16 @@ export type AgentRuntimeResultView = {
   }>;
 };
 
+export type AgentPurchaseCompletionView = {
+  resourceId: string;
+  resourceTitle: string;
+  amountUSDC: number;
+  txHash: string;
+  settlementStatus: "SETTLED" | "CONFIRMING" | "FAILED";
+  unlocked: boolean;
+  explorerUrl: string | null;
+};
+
 export type AgentRunApiSuccess = {
   ok: true;
   result: AgentRuntimeResultView;
