@@ -49,6 +49,9 @@ export default async function AgentHistoryPage({
               <Link href="/agent/analytics" style={secondaryLinkStyle}>
                 View analytics
               </Link>
+              <Link href="/agent/policies" style={secondaryLinkStyle}>
+                View policies
+              </Link>
             </div>
           </div>
         </header>

@@ -2,8 +2,12 @@ import { NextResponse } from "next/server";
 import { requireAgentOwner, UnauthorizedAgentOwnerError } from "@/lib/auth/requireAgentOwner";
 import { InputError } from "@/lib/validation";
 import { AgentExecutionRepository } from "@/services/agent/AgentExecutionRepository";
+import {
+  AgentPolicyConflictError,
+  AgentPolicyRepository,
+} from "@/services/agent/AgentPolicyRepository";
 import { runAgentApplication } from "@/services/agent/AgentApplicationService";
-import type { AgentApplicationInput } from "@/services/agent/AgentApplicationService";
+import type { AgentPolicyRunOverrides } from "@/services/agent/AgentPolicyTypes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,18 +22,49 @@ export async function handleAgentRunRequest(
   getOwner = requireAgentOwner,
 ) {
   try {
+    const owner = getOwner(request);
     const body = await parseJsonBody(request);
     const input = parseAgentRunInput(body);
-    const owner = getOwner(request);
-    const result = await runApplication(input, {
-      executionRepository: new AgentExecutionRepository(),
+    const policyRepository = new AgentPolicyRepository();
+    const resolvedPolicy = await policyRepository.resolvePolicyForExecution({
       ownerId: owner.ownerId,
+      policyId: input.policyId,
+      overrides: input.policyOverrides,
     });
+
+    if (!resolvedPolicy) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "policy not found",
+        },
+        { status: 404 },
+      );
+    }
+
+    const result = await runApplication(
+      {
+        goal: input.goal,
+        policy: resolvedPolicy.runtimePolicy,
+        policySnapshot: resolvedPolicy.snapshot,
+        ...(input.resourceLimit !== undefined ? { resourceLimit: input.resourceLimit } : {}),
+      },
+      {
+        executionRepository: new AgentExecutionRepository(),
+        ownerId: owner.ownerId,
+      },
+    );
     const { executionId = null, ...runtimeResult } = result;
 
     return NextResponse.json({
       ok: true,
       executionId,
+      policy: {
+        id: resolvedPolicy.policy.id,
+        name: resolvedPolicy.policy.name,
+        version: resolvedPolicy.policy.version,
+        overridesApplied: resolvedPolicy.overridesApplied,
+      },
       result: runtimeResult,
     });
   } catch (error) {
@@ -53,6 +88,16 @@ export async function handleAgentRunRequest(
       );
     }
 
+    if (error instanceof AgentPolicyConflictError) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: error.message,
+        },
+        { status: 409 },
+      );
+    }
+
     console.error(error);
     return NextResponse.json(
       {
@@ -72,21 +117,33 @@ async function parseJsonBody(request: Request) {
   }
 }
 
-function parseAgentRunInput(body: unknown): AgentApplicationInput {
+type ParsedAgentRunInput = Readonly<{
+  goal: string;
+  policyId: string | null;
+  policyOverrides: AgentPolicyRunOverrides | undefined;
+  resourceLimit: number | undefined;
+}>;
+
+function parseAgentRunInput(body: unknown): ParsedAgentRunInput {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw new InputError("request body must be an object");
   }
 
-  const goal = requireString((body as Record<string, unknown>).goal, "goal");
-  const policy = requirePolicy((body as Record<string, unknown>).policy);
+  const record = body as Record<string, unknown>;
+  const goal = requireString(record.goal, "goal");
+  const policyId = parseOptionalString(record.policyId ?? record.selectedPolicyId) ?? null;
+  const policyOverrides = parsePolicyOverrides(
+    record.policyOverrides ?? record.policy ?? null,
+  );
   const resourceLimit = parseOptionalResourceLimit(
-    (body as Record<string, unknown>).resourceLimit,
+    record.resourceLimit,
   );
 
   return {
     goal,
-    policy,
-    ...(resourceLimit !== undefined ? { resourceLimit } : {}),
+    policyId,
+    policyOverrides,
+    resourceLimit,
   };
 }
 
@@ -98,27 +155,40 @@ function requireString(value: unknown, field: string) {
   return value.trim();
 }
 
-function requirePolicy(value: unknown) {
+function parsePolicyOverrides(value: unknown): AgentPolicyRunOverrides | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new InputError("policy is required");
+    throw new InputError("policy overrides must be an object");
   }
 
   const record = value as Record<string, unknown>;
+  const overrides: AgentPolicyRunOverrides = {};
 
-  return {
-    remainingBudgetUSDC: requireNumber(
+  if (record.remainingBudgetUSDC !== undefined) {
+    overrides.remainingBudgetUSDC = requireOptionalNumber(
       record.remainingBudgetUSDC,
-      "policy.remainingBudgetUSDC",
-    ),
-    maxPurchaseUSDC: requireNumber(
+      "policyOverrides.remainingBudgetUSDC",
+    );
+  }
+
+  if (record.maxPurchaseUSDC !== undefined) {
+    overrides.maxPurchaseUSDC = requireOptionalNumber(
       record.maxPurchaseUSDC,
-      "policy.maxPurchaseUSDC",
-    ),
-    minimumMatchScore: requireNumber(
-      record.minimumMatchScore,
-      "policy.minimumMatchScore",
-    ),
-  };
+      "policyOverrides.maxPurchaseUSDC",
+    );
+  }
+
+  if (record.minimumScore !== undefined) {
+    overrides.minimumScore = requireOptionalNumber(
+      record.minimumScore,
+      "policyOverrides.minimumScore",
+    );
+  }
+
+  return overrides;
 }
 
 function requireNumber(value: unknown, field: string) {
@@ -127,6 +197,23 @@ function requireNumber(value: unknown, field: string) {
   }
 
   return value;
+}
+
+function requireOptionalNumber(value: unknown, field: string) {
+  if (value === undefined || value === null || value === "") {
+    throw new InputError(`${field} must be a number`);
+  }
+
+  return requireNumber(value, field);
+}
+
+function parseOptionalString(value: unknown) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function parseOptionalResourceLimit(value: unknown) {

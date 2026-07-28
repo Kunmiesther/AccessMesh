@@ -705,6 +705,7 @@ export class AgentExecutionRepository {
     const purchase = reasoning?.purchase ?? null;
     const failure = reasoning?.failure ?? null;
     const selectedResource = reasoning?.selectedResource ?? null;
+    const policy = reasoning?.policy ?? null;
     const startedAt = toIsoString(execution.startedAt);
     const completedAt = toOptionalIsoString(execution.completedAt);
 
@@ -713,6 +714,9 @@ export class AgentExecutionRepository {
       goal: String(execution.goal ?? ""),
       status: String(execution.status ?? "CREATED") as AgentExecutionStatus,
       decision: isRecommendationDecision(execution.decision) ? execution.decision : null,
+      policyId: policy?.policyId ?? null,
+      policyName: policy?.policyName ?? null,
+      policyVersion: policy?.policyVersion ?? null,
       selectedResourceId:
         typeof execution.selectedResourceId === "string" && execution.selectedResourceId.trim().length > 0
           ? execution.selectedResourceId

@@ -157,6 +157,9 @@ async function AnalyticsContent({
               <Link href="/agent/history" style={footerLinkStyle}>
                 View history
               </Link>
+              <Link href="/agent/policies" style={footerLinkStyle}>
+                View policies
+              </Link>
             </div>
           </section>
         </>

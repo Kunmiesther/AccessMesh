@@ -5,6 +5,7 @@ import type {
   AgentResourceCandidate,
   CandidateEvaluation,
 } from "@/services/agent/types";
+import type { AgentPolicyStatus } from "./AgentPolicyTypes";
 
 export type AgentExecutionStatus =
   | "CREATED"
@@ -39,7 +40,27 @@ export type AgentUnlockStatus =
   | "UNLOCKED"
   | "FAILED";
 
-export type SerializablePolicySnapshot = Readonly<AgentBudgetPolicy>;
+export type SerializablePolicySnapshot = Readonly<
+  AgentBudgetPolicy &
+    Partial<{
+      policyId: string | null;
+      policyName: string | null;
+      policyStatus: AgentPolicyStatus | "LEGACY";
+      policyVersion: number | null;
+      policyDescription: string | null;
+      isDefault: boolean | null;
+      dailyBudgetUSDC: number | null;
+      minimumScore: number | null;
+      manualApprovalRequired: boolean;
+      expiresAt: string | null;
+      overridesApplied: string[];
+      overrides: {
+        remainingBudgetUSDC?: number | null;
+        maxPurchaseUSDC?: number | null;
+        minimumScore?: number | null;
+      };
+    }>
+>;
 
 export type SerializableGoalSnapshot = Readonly<
   AgentGoalPlan & {
@@ -156,6 +177,9 @@ export type AgentExecutionSummary = Readonly<{
   goal: string;
   status: AgentExecutionStatus;
   decision: AgentRecommendationDecision | null;
+  policyId: string | null;
+  policyName: string | null;
+  policyVersion: number | null;
   selectedResourceId: string | null;
   selectedResourceTitle: string | null;
   estimatedCostUSDC: number | null;

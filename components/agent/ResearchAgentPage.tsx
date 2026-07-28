@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Navbar } from "@/components/Navbar";
+import { formatDateTime, formatUSDC } from "@/lib/ui";
 import { AGENT_LOADING_STAGES, DEFAULT_AGENT_FORM, DEFAULT_AGENT_RESOURCE_LIMIT, type AgentComposerFields } from "./types";
 import type { AgentBudgetPolicy } from "@/services/agent/types";
 import { AgentGoalForm } from "./AgentGoalForm";
@@ -19,6 +20,8 @@ import {
 } from "./agentUi";
 import type { AgentPurchaseCompletionView, AgentRuntimeResultView } from "./types";
 import { useAgentOwnerSession } from "@/hooks/useAgentOwnerSession";
+import type { AgentPolicyRunOverrides, AgentPolicySummary } from "@/services/agent/AgentPolicyTypes";
+import { validateAgentPolicyRunOverrides } from "@/services/agent/AgentPolicyValidation";
 
 const DEFAULT_ERROR = "The agent request could not be completed.";
 
@@ -30,11 +33,20 @@ export function ResearchAgentPage() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AgentRuntimeResultView | null>(null);
   const [submittedPolicy, setSubmittedPolicy] = useState<AgentBudgetPolicy | null>(null);
+  const [availablePolicies, setAvailablePolicies] = useState<AgentPolicySummary[]>([]);
+  const [selectedPolicyId, setSelectedPolicyId] = useState<string>("");
+  const [policyOverrides, setPolicyOverrides] = useState<AgentPolicyRunOverrides>({
+    remainingBudgetUSDC: "",
+    maxPurchaseUSDC: "",
+    minimumScore: "",
+  });
+  const [policyLoading, setPolicyLoading] = useState(false);
+  const [policyError, setPolicyError] = useState<string | null>(null);
   const [purchaseReviewOpen, setPurchaseReviewOpen] = useState(false);
   const [purchaseCompletion, setPurchaseCompletion] =
     useState<AgentPurchaseCompletionView | null>(null);
   const selectedCandidateRef = useRef<HTMLDivElement | null>(null);
-  const { ensureAgentOwnerSession } = useAgentOwnerSession();
+  const { status: ownerSessionStatus, ensureAgentOwnerSession } = useAgentOwnerSession();
 
   const validation = useMemo(() => validateAgentComposerFields(values), [values]);
 
@@ -53,7 +65,110 @@ export function ResearchAgentPage() {
     return () => window.clearInterval(interval);
   }, [isRunning]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    if (ownerSessionStatus === "unauthenticated") {
+      setAvailablePolicies([]);
+      setSelectedPolicyId("");
+      setPolicyOverrides({
+        remainingBudgetUSDC: "",
+        maxPurchaseUSDC: "",
+        minimumScore: "",
+      });
+      setPolicyLoading(false);
+      setPolicyError(null);
+      return undefined;
+    }
+
+    if (ownerSessionStatus !== "authenticated") {
+      return undefined;
+    }
+
+    async function loadPolicies() {
+      setPolicyLoading(true);
+      setPolicyError(null);
+
+      try {
+        const response = await fetch("/api/agent/policies", {
+          headers: {
+            "content-type": "application/json",
+          },
+        });
+
+        const payload = (await response.json().catch(() => null)) as
+          | {
+              ok?: boolean;
+              policies?: AgentPolicySummary[];
+              defaultPolicyId?: string | null;
+              error?: { message?: string } | string;
+            }
+          | null;
+
+        if (!response.ok || !payload?.ok || !Array.isArray(payload.policies)) {
+          const message =
+            typeof payload?.error === "string"
+              ? payload.error
+              : payload?.error?.message ?? "Saved policies could not be loaded.";
+          throw new Error(message);
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        const policies = payload.policies ?? [];
+        setAvailablePolicies(policies);
+
+        const activePolicies = policies.filter((policy) => policy.status === "ACTIVE");
+        const defaultPolicyId =
+          payload.defaultPolicyId ??
+          policies.find((policy) => policy.isDefault)?.id ??
+          activePolicies[0]?.id ??
+          "";
+
+        setSelectedPolicyId((current) => {
+          if (current && policies.some((policy) => policy.id === current)) {
+            return current;
+          }
+
+          return defaultPolicyId;
+        });
+      } catch (loadError) {
+        if (!cancelled) {
+          setPolicyError(loadError instanceof Error ? loadError.message : "Saved policies could not be loaded.");
+          setAvailablePolicies([]);
+          setSelectedPolicyId("");
+        }
+      } finally {
+        if (!cancelled) {
+          setPolicyLoading(false);
+        }
+      }
+    }
+
+    void loadPolicies();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ownerSessionStatus]);
+
   const visibleErrors = submitted ? validation.errors : {};
+  const activePolicies = useMemo(
+    () => availablePolicies.filter((policy) => policy.status === "ACTIVE"),
+    [availablePolicies],
+  );
+  const selectedPolicy = useMemo(() => {
+    if (selectedPolicyId) {
+      const exactMatch = availablePolicies.find((policy) => policy.id === selectedPolicyId);
+      if (exactMatch) {
+        return exactMatch;
+      }
+    }
+
+    return activePolicies.find((policy) => policy.isDefault) ?? activePolicies[0] ?? null;
+  }, [activePolicies, availablePolicies, selectedPolicyId]);
   const selectedPriceUSDC = result?.decision === "BUY" ? result.selectedResource?.priceUSDC ?? 0 : 0;
   const selectedCandidateId = result ? getSelectedCandidateId(result) : null;
 
@@ -61,6 +176,7 @@ export function ResearchAgentPage() {
     event.preventDefault();
     setSubmitted(true);
     setError(null);
+    setPolicyError(null);
     setPurchaseReviewOpen(false);
     setPurchaseCompletion(null);
 
@@ -74,6 +190,28 @@ export function ResearchAgentPage() {
       await ensureAgentOwnerSession();
       setIsRunning(true);
 
+      const overrideInput = buildPolicyOverrideInput(policyOverrides);
+      let validatedOverrides: AgentPolicyRunOverrides | undefined;
+
+      if (selectedPolicy && Object.keys(overrideInput).length > 0) {
+        const overrideValidation = validateAgentPolicyRunOverrides(
+          overrideInput,
+          selectedPolicy,
+        );
+
+        if (!overrideValidation.ok) {
+          setPolicyError(
+            Object.values(overrideValidation.errors).filter(Boolean).join("; ") ||
+              "Policy overrides could not be applied.",
+          );
+          return;
+        }
+
+        validatedOverrides = overrideValidation.value;
+      } else if (Object.keys(overrideInput).length > 0) {
+        validatedOverrides = overrideInput as AgentPolicyRunOverrides;
+      }
+
       const response = await fetch("/api/agent/run", {
         method: "POST",
         headers: {
@@ -81,7 +219,8 @@ export function ResearchAgentPage() {
         },
         body: JSON.stringify({
           goal: values.goal.trim(),
-          policy: validation.policy,
+          selectedPolicyId: selectedPolicy?.id ?? undefined,
+          policyOverrides: validatedOverrides,
           resourceLimit: DEFAULT_AGENT_RESOURCE_LIMIT,
         }),
       });
@@ -167,6 +306,9 @@ export function ResearchAgentPage() {
               </Link>
               <Link href="/agent/analytics" style={secondaryActionButtonStyle}>
                 View analytics
+              </Link>
+              <Link href="/agent/policies" style={secondaryActionButtonStyle}>
+                View policies
               </Link>
             </div>
           </div>
@@ -272,6 +414,103 @@ export function ResearchAgentPage() {
                   (Number(values.minimumMatchScore) || 0)
                 }
               />
+
+              <section style={policyPanelStyle}>
+                <div style={policyPanelHeaderStyle}>
+                  <div>
+                    <p style={policyPanelEyebrowStyle}>Saved policy</p>
+                    <h2 style={policyPanelTitleStyle}>Research Agent policy</h2>
+                  </div>
+                  <Link href="/agent/policies" style={policyPanelLinkStyle}>
+                    Manage policies
+                  </Link>
+                </div>
+
+                {policyLoading ? <p style={policyPanelCopyStyle}>Loading saved policies...</p> : null}
+                {policyError ? <p style={policyPanelErrorStyle}>{policyError}</p> : null}
+
+                <label style={policyFieldStyle}>
+                  <span style={policyLabelStyle}>Selected policy</span>
+                  <select
+                    value={selectedPolicyId}
+                    onChange={(event) => setSelectedPolicyId(event.target.value)}
+                    disabled={policyLoading || activePolicies.length === 0}
+                    style={policySelectStyle}
+                  >
+                    <option value="">Use default policy</option>
+                    {activePolicies.map((policy) => (
+                      <option key={policy.id} value={policy.id}>
+                        {policy.isDefault ? `${policy.name} (default)` : policy.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {selectedPolicy ? (
+                  <dl style={policyDetailsGridStyle}>
+                    <PolicyMetric label="Status" value={selectedPolicy.status === "ACTIVE" ? "Active" : "Archived"} />
+                    <PolicyMetric label="Version" value={`v${selectedPolicy.version}`} />
+                    <PolicyMetric label="Daily budget" value={formatUSDC(Number(selectedPolicy.dailyBudgetUSDC))} />
+                    <PolicyMetric label="Remaining budget" value={formatUSDC(Number(selectedPolicy.remainingBudgetUSDC))} />
+                    <PolicyMetric label="Maximum purchase" value={formatUSDC(Number(selectedPolicy.maxPurchaseUSDC))} />
+                    <PolicyMetric label="Minimum score" value={`${selectedPolicy.minimumScore}/100`} />
+                    <PolicyMetric
+                      label="Expiration"
+                      value={selectedPolicy.expiresAt ? formatDateTime(selectedPolicy.expiresAt) : "None"}
+                    />
+                  </dl>
+                ) : (
+                  <p style={policyPanelCopyStyle}>
+                    A default policy will be used if none is selected yet.
+                  </p>
+                )}
+
+                <div style={policyOverrideGridStyle}>
+                  <OverrideField
+                    id="policy-override-remaining"
+                    label="Run remaining budget"
+                    value={String(policyOverrides.remainingBudgetUSDC ?? "")}
+                    disabled={!selectedPolicy || policyLoading}
+                    onChange={(value) =>
+                      setPolicyOverrides((current) => ({
+                        ...current,
+                        remainingBudgetUSDC: value,
+                      }))
+                    }
+                  />
+                  <OverrideField
+                    id="policy-override-max-purchase"
+                    label="Run maximum purchase"
+                    value={String(policyOverrides.maxPurchaseUSDC ?? "")}
+                    disabled={!selectedPolicy || policyLoading}
+                    onChange={(value) =>
+                      setPolicyOverrides((current) => ({
+                        ...current,
+                        maxPurchaseUSDC: value,
+                      }))
+                    }
+                  />
+                  <OverrideField
+                    id="policy-override-minimum-score"
+                    label="Run minimum score"
+                    value={String(policyOverrides.minimumScore ?? "")}
+                    disabled={!selectedPolicy || policyLoading}
+                    onChange={(value) =>
+                      setPolicyOverrides((current) => ({
+                        ...current,
+                        minimumScore: value,
+                      }))
+                    }
+                    step="1"
+                    min="0"
+                    max="100"
+                  />
+                </div>
+
+                <p style={policyPanelCopyStyle}>
+                  Per-run overrides can only make the policy more restrictive. Manual approval stays required.
+                </p>
+              </section>
 
               <section style={policyNoteStyle}>
                 <p style={policyNoteLabelStyle}>Reminder</p>
@@ -583,3 +822,191 @@ const policyNoteCopyStyle = {
   lineHeight: 1.7,
   fontSize: 13,
 } as const;
+
+const policyPanelStyle = {
+  background: "rgba(13, 15, 17, 0.96)",
+  border: "1px solid var(--border)",
+  borderRadius: 18,
+  padding: 18,
+  display: "grid",
+  gap: 14,
+} as const;
+
+const policyPanelHeaderStyle = {
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  gap: 12,
+  flexWrap: "wrap",
+} as const;
+
+const policyPanelEyebrowStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 11,
+  color: "var(--accent)",
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  marginBottom: 6,
+} as const;
+
+const policyPanelTitleStyle = {
+  color: "var(--text-primary)",
+  fontSize: 15,
+  lineHeight: 1.35,
+} as const;
+
+const policyPanelLinkStyle = {
+  borderRadius: 999,
+  border: "1px solid var(--border)",
+  background: "rgba(255,255,255,0.03)",
+  color: "var(--text-secondary)",
+  padding: "8px 10px",
+  fontFamily: "var(--font-mono)",
+  fontSize: 11,
+  textDecoration: "none",
+  whiteSpace: "nowrap" as const,
+} as const;
+
+const policyPanelCopyStyle = {
+  color: "var(--text-secondary)",
+  fontSize: 12,
+  lineHeight: 1.6,
+} as const;
+
+const policyPanelErrorStyle = {
+  color: "var(--error)",
+  fontSize: 12,
+  lineHeight: 1.6,
+} as const;
+
+const policyFieldStyle = {
+  display: "grid",
+  gap: 8,
+} as const;
+
+const policyLabelStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 10,
+  color: "var(--text-muted)",
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+} as const;
+
+const policySelectStyle = {
+  width: "100%",
+  borderRadius: 12,
+  border: "1px solid var(--border)",
+  background: "#0d0f11",
+  color: "var(--text-primary)",
+  padding: "11px 12px",
+  fontSize: 14,
+  outline: "none",
+} as const;
+
+const policyDetailsGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+  gap: 10,
+} as const;
+
+const policyMetricStyle = {
+  borderRadius: 12,
+  border: "1px solid var(--border-subtle)",
+  background: "rgba(255,255,255,0.02)",
+  padding: 12,
+  minWidth: 0,
+} as const;
+
+const policyMetricLabelStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 10,
+  color: "var(--text-muted)",
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  marginBottom: 6,
+} as const;
+
+const policyMetricValueStyle = {
+  color: "var(--text-primary)",
+  fontSize: 13,
+  lineHeight: 1.5,
+  overflowWrap: "anywhere" as const,
+} as const;
+
+const policyOverrideGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+  gap: 10,
+} as const;
+
+function PolicyMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div style={policyMetricStyle}>
+      <p style={policyMetricLabelStyle}>{label}</p>
+      <p style={policyMetricValueStyle}>{value}</p>
+    </div>
+  );
+}
+
+function OverrideField({
+  id,
+  label,
+  value,
+  onChange,
+  disabled = false,
+  step = "0.01",
+  min = "0",
+  max,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  step?: string;
+  min?: string;
+  max?: string;
+}) {
+  return (
+    <label style={policyFieldStyle}>
+      <span style={policyLabelStyle}>{label}</span>
+      <input
+        id={id}
+        name={id}
+        type="number"
+        inputMode="decimal"
+        step={step}
+        min={min}
+        max={max}
+        disabled={disabled}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        style={policySelectStyle}
+      />
+    </label>
+  );
+}
+
+function buildPolicyOverrideInput(values: AgentPolicyRunOverrides) {
+  const input: Record<string, unknown> = {};
+
+  if (values.remainingBudgetUSDC !== undefined && values.remainingBudgetUSDC !== "") {
+    input.remainingBudgetUSDC = values.remainingBudgetUSDC;
+  }
+
+  if (values.maxPurchaseUSDC !== undefined && values.maxPurchaseUSDC !== "") {
+    input.maxPurchaseUSDC = values.maxPurchaseUSDC;
+  }
+
+  if (values.minimumScore !== undefined && values.minimumScore !== "") {
+    input.minimumScore = values.minimumScore;
+  }
+
+  return input;
+}

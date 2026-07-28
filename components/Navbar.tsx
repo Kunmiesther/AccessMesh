@@ -55,6 +55,9 @@ export function Navbar() {
           <Link href="/agent/analytics" style={navLinkStyle}>
             Analytics
           </Link>
+          <Link href="/agent/policies" style={navLinkStyle}>
+            Policies
+          </Link>
           <Link href="/create" style={navLinkStyle}>
             Create
           </Link>

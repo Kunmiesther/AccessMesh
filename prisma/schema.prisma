@@ -168,15 +168,17 @@ model X402AccessLog {
 }
 
 model Agent {
-  id          String   @id @default(cuid())
-  ownerWallet String
-  name        String
-  status      String   @default("ACTIVE")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              String        @id @default(cuid())
+  ownerWallet     String
+  name            String
+  status          String        @default("ACTIVE")
+  defaultPolicyId String?       @unique
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
-  policy     AgentPolicy?
-  executions AgentExecution[]
+  policies       AgentPolicy[] @relation("AgentPolicies")
+  defaultPolicy  AgentPolicy?  @relation("AgentDefaultPolicy", fields: [defaultPolicyId], references: [id], onDelete: SetNull)
+  executions     AgentExecution[]
 
   @@index([ownerWallet])
   @@index([status])
@@ -184,17 +186,30 @@ model Agent {
 }
 
 model AgentPolicy {
-  id                  String    @id @default(cuid())
-  agentId             String    @unique
-  dailyBudgetUSDC     Float
-  remainingBudgetUSDC Float
-  maxPurchaseUSDC     Float
-  minimumScore        Int       @default(60)
-  expiresAt           DateTime?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  id                     String   @id @default(cuid())
+  agentId                String
+  name                   String
+  description            String?
+  status                 String   @default("ACTIVE")
+  version                Int      @default(1)
+  dailyBudgetUSDC        Float
+  remainingBudgetUSDC    Float
+  maxPurchaseUSDC        Float
+  minimumScore           Int      @default(60)
+  manualApprovalRequired Boolean  @default(true)
+  expiresAt              DateTime?
+  archivedAt             DateTime?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
-  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agent Agent @relation("AgentPolicies", fields: [agentId], references: [id], onDelete: Cascade)
+  defaultForAgent Agent? @relation("AgentDefaultPolicy")
+
+  @@unique([agentId, name])
+  @@index([agentId])
+  @@index([agentId, status])
+  @@index([agentId, archivedAt])
+  @@index([createdAt])
 }
 
 model AgentExecution {

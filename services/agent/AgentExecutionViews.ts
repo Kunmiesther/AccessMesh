@@ -19,6 +19,7 @@ export function buildAgentExecutionSummary(
   const purchase = reasoning?.purchase ?? null;
   const failure = reasoning?.failure ?? null;
   const selectedResource = reasoning?.selectedResource ?? null;
+  const policy = reasoning?.policy ?? null;
   const updatedAt = execution.completedAt ?? execution.startedAt;
 
   return {
@@ -26,6 +27,9 @@ export function buildAgentExecutionSummary(
     goal: extractGoalLabel(reasoning, execution.goal),
     status: normalizeStatus(execution.status),
     decision: execution.decision,
+    policyId: policy?.policyId ?? null,
+    policyName: policy?.policyName ?? null,
+    policyVersion: policy?.policyVersion ?? null,
     selectedResourceId: execution.selectedResourceId,
     selectedResourceTitle: selectedResource?.title ?? null,
     estimatedCostUSDC: execution.estimatedCostUSDC,

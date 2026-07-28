@@ -1,16 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { handleAgentRunRequest } from "../../app/api/agent/run/route";
+import { AgentPolicyRepository } from "../../services/agent/AgentPolicyRepository";
 
 test("malformed input returns 400", async () => {
   const request = new Request("http://localhost/api/agent/run", {
     method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
     body: "not-json",
   });
 
   const response = await handleAgentRunRequest(request, async () => {
     throw new Error("should not be called");
-  });
+  }, () => ({
+    ownerId: "owner-1",
+    walletAddress: "0x1111111111111111111111111111111111111111",
+    username: "accessmesh",
+    authenticationMethod: "CIRCLE_SESSION",
+  }));
 
   assert.equal(response.status, 400);
   assert.deepEqual(await response.json(), {
@@ -47,26 +56,71 @@ test("unauthenticated requests are rejected", async () => {
 });
 
 test("successful request returns a structured result without private content", async () => {
+  const originalResolve = AgentPolicyRepository.prototype.resolvePolicyForExecution;
+  AgentPolicyRepository.prototype.resolvePolicyForExecution = async () =>
+    ({
+      agentId: "agent-1",
+      policy: {
+        id: "policy-1",
+        name: "Balanced Buyer",
+        description: "Reusable policy",
+        status: "ACTIVE",
+        isDefault: true,
+        version: 3,
+        dailyBudgetUSDC: "20",
+        remainingBudgetUSDC: "20",
+        maxPurchaseUSDC: "4",
+        minimumScore: 70,
+        manualApprovalRequired: true,
+        expiresAt: null,
+        createdAt: "2026-07-28T00:00:00.000Z",
+        updatedAt: "2026-07-28T00:00:00.000Z",
+        archivedAt: null,
+      },
+      runtimePolicy: {
+        remainingBudgetUSDC: 20,
+        maxPurchaseUSDC: 4,
+        minimumMatchScore: 80,
+      },
+      snapshot: {
+        policyId: "policy-1",
+        policyName: "Balanced Buyer",
+        policyStatus: "ACTIVE",
+        policyVersion: 3,
+        policyDescription: "Reusable policy",
+        isDefault: true,
+        dailyBudgetUSDC: 20,
+        remainingBudgetUSDC: 20,
+        maxPurchaseUSDC: 4,
+        minimumScore: 70,
+        manualApprovalRequired: true,
+        expiresAt: null,
+        overridesApplied: [],
+        overrides: {},
+      },
+      overridesApplied: [],
+    }) as never;
+
   const request = new Request("http://localhost/api/agent/run", {
     method: "POST",
     headers: {
       "content-type": "application/json",
     },
-  body: JSON.stringify({
+    body: JSON.stringify({
       goal: "Find the best Circle CCTP guide under 0.20 USDC",
-      policy: {
-        remainingBudgetUSDC: 1,
-        maxPurchaseUSDC: 0.25,
-        minimumMatchScore: 35,
+      selectedPolicyId: "policy-1",
+      policyOverrides: {
+        minimumScore: 80,
       },
       resourceLimit: 50,
       resourceContent: "should be ignored",
-  }),
+    }),
   });
 
-  const response = await handleAgentRunRequest(
-    request,
-    async (input) => ({
+  try {
+    const response = await handleAgentRunRequest(
+      request,
+      async (input) => ({
       executionId: "execution-1",
       goal: {
         originalGoal: input.goal,
@@ -99,36 +153,48 @@ test("successful request returns a structured result without private content", a
           message: "ok",
         },
       ],
-    }),
-    () => ({
-      ownerId: "owner-1",
-      walletAddress: "0x1111111111111111111111111111111111111111",
-      username: "accessmesh",
-      authenticationMethod: "CIRCLE_SESSION",
-    }),
-  );
+      }),
+      () => ({
+        ownerId: "owner-1",
+        walletAddress: "0x1111111111111111111111111111111111111111",
+        username: "accessmesh",
+        authenticationMethod: "CIRCLE_SESSION",
+      }),
+    );
 
-  assert.equal(response.status, 200);
-  const payload = (await response.json()) as {
-    ok: boolean;
-    executionId: string | null;
-    result: {
-      goal: Record<string, unknown>;
-      decision: string;
-      selectedResource: Record<string, unknown> | null;
-      selectedEvaluation: Record<string, unknown> | null;
-      candidates: unknown[];
-      trace: unknown[];
+    assert.equal(response.status, 200);
+    const payload = (await response.json()) as {
+      ok: boolean;
+      executionId: string | null;
+      policy: {
+        id: string;
+        name: string;
+        version: number;
+        overridesApplied: string[];
+      };
+      result: {
+        goal: Record<string, unknown>;
+        decision: string;
+        selectedResource: Record<string, unknown> | null;
+        selectedEvaluation: Record<string, unknown> | null;
+        candidates: unknown[];
+        trace: unknown[];
+      };
     };
-  };
 
-  assert.equal(payload.ok, true);
-  assert.equal(payload.executionId, "execution-1");
-  assert.equal(payload.result.decision, "BUY");
-  assert.ok(payload.result.selectedResource);
-  assert.equal(
-    Object.prototype.hasOwnProperty.call(payload.result.selectedResource, "resourceContent"),
-    false,
-  );
-  assert.equal(JSON.stringify(payload).includes("should be ignored"), false);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.executionId, "execution-1");
+    assert.equal(payload.policy.id, "policy-1");
+    assert.equal(payload.policy.name, "Balanced Buyer");
+    assert.equal(payload.policy.version, 3);
+    assert.equal(payload.result.decision, "BUY");
+    assert.ok(payload.result.selectedResource);
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(payload.result.selectedResource, "resourceContent"),
+      false,
+    );
+    assert.equal(JSON.stringify(payload).includes("should be ignored"), false);
+  } finally {
+    AgentPolicyRepository.prototype.resolvePolicyForExecution = originalResolve;
+  }
 });

@@ -23,6 +23,7 @@ import type {
 export type AgentApplicationInput = {
   goal: string;
   policy: AgentBudgetPolicy;
+  policySnapshot?: SerializablePolicySnapshot;
   resourceLimit?: number;
 };
 
@@ -59,7 +60,7 @@ export async function runAgentApplication(
       ? await createExecutionRecord(persistence.executionRepository, {
           ownerId: persistence.ownerId,
           goal: toSerializableGoalSnapshot(goal),
-          policySnapshot: toSerializablePolicySnapshot(policy),
+          policySnapshot: input.policySnapshot ?? toSerializablePolicySnapshot(policy),
           normalizedGoal: goal,
           candidateCount: 0,
           trace: [],
@@ -170,8 +171,8 @@ function validatePolicy(policy: AgentBudgetPolicy): AgentBudgetPolicy {
     throw new InputError("policy.remainingBudgetUSDC must be 0 or greater");
   }
 
-  if (maxPurchaseUSDC <= 0) {
-    throw new InputError("policy.maxPurchaseUSDC must be greater than 0");
+  if (maxPurchaseUSDC < 0) {
+    throw new InputError("policy.maxPurchaseUSDC must be 0 or greater");
   }
 
   if (minimumMatchScore < 0 || minimumMatchScore > 100) {
@@ -232,6 +233,7 @@ function toSerializablePolicySnapshot(
     remainingBudgetUSDC: policy.remainingBudgetUSDC,
     maxPurchaseUSDC: policy.maxPurchaseUSDC,
     minimumMatchScore: policy.minimumMatchScore,
+    minimumScore: policy.minimumMatchScore,
   };
 }
 

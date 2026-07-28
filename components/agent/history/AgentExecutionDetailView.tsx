@@ -47,6 +47,9 @@ export function AgentExecutionDetailPanel({
           <Link href="/agent/analytics" style={secondaryLinkStyle}>
             View analytics
           </Link>
+          <Link href="/agent/policies" style={secondaryLinkStyle}>
+            View policies
+          </Link>
           <Link href="/agent" style={primaryLinkStyle}>
             Open Research Agent
           </Link>
@@ -103,11 +106,21 @@ export function AgentExecutionDetailPanel({
         />
 
         <div style={definitionGridStyle}>
+          <Definition label="Policy name" value={execution.policy?.policyName ?? "Legacy or ad hoc policy"} />
+          <Definition label="Policy ID" value={execution.policy?.policyId ?? "Unavailable"} />
+          <Definition
+            label="Policy version"
+            value={execution.policy?.policyVersion ? `v${execution.policy.policyVersion}` : "Unavailable"}
+          />
+          <Definition
+            label="Overrides"
+            value={execution.policy?.overridesApplied?.length ? execution.policy.overridesApplied.join(", ") : "None"}
+          />
           <Definition label="Original goal" value={execution.goal?.originalGoal ?? "Unavailable"} />
           <Definition label="Normalized goal" value={execution.normalizedGoal ?? execution.goal?.normalizedQuery ?? "Unavailable"} />
           <Definition
             label="Daily budget"
-            value={execution.policy ? formatUSDC(execution.policy.remainingBudgetUSDC) : "Unavailable"}
+            value={execution.policy ? formatUSDC(execution.policy.dailyBudgetUSDC ?? execution.policy.remainingBudgetUSDC) : "Unavailable"}
           />
           <Definition
             label="Remaining budget"
@@ -119,7 +132,7 @@ export function AgentExecutionDetailPanel({
           />
           <Definition
             label="Minimum score"
-            value={execution.policy ? `${execution.policy.minimumMatchScore}/100` : "Unavailable"}
+            value={execution.policy ? `${execution.policy.minimumScore ?? execution.policy.minimumMatchScore}/100` : "Unavailable"}
           />
           <Definition
             label="Goal budget"

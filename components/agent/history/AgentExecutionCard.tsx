@@ -28,6 +28,14 @@ export function AgentExecutionCard({
       </div>
 
       <div style={bodyGridStyle}>
+        <Info
+          label="Policy"
+          value={
+            execution.policyName
+              ? `${execution.policyName}${execution.policyVersion ? ` v${execution.policyVersion}` : ""}`
+              : "Legacy or ad hoc policy"
+          }
+        />
         <Info label="Selected resource" value={execution.selectedResourceTitle ?? "Unavailable"} />
         <Info
           label="Estimated cost"
