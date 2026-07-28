@@ -28,6 +28,42 @@ export function formatDate(iso: string): string {
   });
 }
 
+export function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) {
+    return "Unknown time";
+  }
+
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) {
+    return "Unknown time";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+export function abbreviateIdentifier(
+  value: string | null | undefined,
+  options: { start?: number; end?: number } = {},
+) {
+  if (!value) {
+    return "Unavailable";
+  }
+
+  const start = options.start ?? 6;
+  const end = options.end ?? 4;
+  if (value.length <= start + end + 3) {
+    return value;
+  }
+
+  return `${value.slice(0, start)}...${value.slice(-end)}`;
+}
+
 // Status label normalisation
 export function normaliseStatus(raw: string): string {
   return raw.replace(/_/g, " ").toLowerCase();

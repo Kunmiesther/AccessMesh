@@ -103,11 +103,17 @@ export function AgentResultSummary({
           ) : null}
 
           <div style={footerStyle}>
-            <p style={helperStyle}>
-              {purchaseCompletion
-                ? "Purchase complete. The selected resource is now unlocked."
-                : "This is a recommendation only. No payment has been executed."}
-            </p>
+          <p style={helperStyle}>
+            {purchaseCompletion
+              ? "Purchase complete. The selected resource is now unlocked."
+              : "This is a recommendation only. No payment has been executed."}
+          </p>
+          <div style={footerActionsStyle}>
+            {result.executionId ? (
+              <Link href={`/agent/executions/${result.executionId}`} style={secondaryButtonStyle}>
+                View execution
+              </Link>
+            ) : null}
             {purchaseCompletion ? (
               <Link
                 href={`/resource/${purchaseCompletion.resourceId}`}
@@ -120,6 +126,7 @@ export function AgentResultSummary({
                 Review purchase
               </button>
             )}
+          </div>
           </div>
         </div>
       ) : (
@@ -332,6 +339,12 @@ const footerStyle = {
   flexWrap: "wrap",
 } as const;
 
+const footerActionsStyle = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+} as const;
+
 const completionStyle = {
   borderRadius: 14,
   border: "1px solid rgba(76,175,125,0.18)",
@@ -351,4 +364,17 @@ const buttonStyle = {
   fontWeight: 700,
   cursor: "pointer",
   whiteSpace: "nowrap" as const,
+} as const;
+
+const secondaryButtonStyle = {
+  borderRadius: 12,
+  border: "1px solid var(--border)",
+  background: "transparent",
+  color: "var(--text-secondary)",
+  padding: "11px 16px",
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: "pointer",
+  whiteSpace: "nowrap" as const,
+  textDecoration: "none",
 } as const;

@@ -21,6 +21,8 @@ import type {
   AgentExecutionRecord,
   AgentExecutionStatus,
   AgentRecommendationDecision,
+  AgentExecutionSummary,
+  AgentExecutionHistoryPage,
   SerializableCandidateComparisonSummary,
   SerializableCandidateEvaluationSnapshot,
   SerializableExecutionReasoning,
@@ -33,6 +35,12 @@ import type {
   SerializableTraceEntry,
   SerializableUnlockMetadata,
 } from "./AgentExecutionTypes";
+import {
+  expandAgentExecutionHistoryStatusFilter,
+  type AgentExecutionHistoryCursor,
+  type AgentExecutionHistoryDecisionFilter,
+  type AgentExecutionHistoryStatusFilter,
+} from "./AgentExecutionHistory";
 
 const DEFAULT_AGENT_NAME = "AccessMesh Research Agent";
 
@@ -46,6 +54,10 @@ export type AgentExecutionRepositoryClient = {
     }): Promise<{ walletAddress: string } | null>;
   };
   agent: {
+    findMany(args: {
+      where: { ownerWallet: string };
+      select: { id: true };
+    }): Promise<Array<{ id: string }>>;
     findFirst(args: {
       where: { ownerWallet: string; name: string };
       orderBy?: { createdAt: "asc" | "desc" };
@@ -72,6 +84,12 @@ export type AgentExecutionRepositoryClient = {
       data: PrismaLikeRecord;
       select: Record<string, boolean>;
     }): Promise<PrismaLikeRecord>;
+    findMany(args: {
+      where?: PrismaLikeRecord;
+      orderBy?: Array<{ startedAt: "asc" | "desc" } | { id: "asc" | "desc" }>;
+      take?: number;
+      select: Record<string, boolean>;
+    }): Promise<PrismaLikeRecord[]>;
   };
   $transaction?<T>(fn: (tx: AgentExecutionRepositoryClient) => Promise<T>): Promise<T>;
 };
@@ -107,6 +125,19 @@ export type FailureInput = SerializableFailureMetadata;
 const EXECUTION_SELECT = {
   id: true,
   agentId: true,
+  goal: true,
+  status: true,
+  decision: true,
+  selectedResourceId: true,
+  reasoning: true,
+  estimatedCostUSDC: true,
+  txHash: true,
+  startedAt: true,
+  completedAt: true,
+} satisfies Record<string, boolean>;
+
+const EXECUTION_LIST_SELECT = {
+  id: true,
   goal: true,
   status: true,
   decision: true,
@@ -468,6 +499,80 @@ export class AgentExecutionRepository {
     return execution ? this.mapExecution(execution) : null;
   }
 
+  async listExecutionsForOwner(input: {
+    ownerId: string;
+    limit?: number;
+    cursor?: AgentExecutionHistoryCursor | null;
+    status?: AgentExecutionHistoryStatusFilter;
+    decision?: AgentExecutionHistoryDecisionFilter;
+    sort?: "newest" | "oldest";
+  }): Promise<AgentExecutionHistoryPage> {
+    const client = await this.getClient();
+    const user = await client.user.findUnique({
+      where: { id: input.ownerId },
+      select: { walletAddress: true },
+    });
+
+    if (!user) {
+      return {
+        executions: [],
+        nextCursor: null,
+        hasMore: false,
+      };
+    }
+
+    const agents = await client.agent.findMany({
+      where: { ownerWallet: user.walletAddress },
+      select: { id: true },
+    });
+
+    if (agents.length === 0) {
+      return {
+        executions: [],
+        nextCursor: null,
+        hasMore: false,
+      };
+    }
+
+    const agentIds = agents.map((agent) => agent.id);
+    const limit = normalizeHistoryLimit(input.limit);
+    const order = input.sort === "oldest" ? "asc" : "desc";
+    const statuses =
+      input.status && input.status !== "all"
+        ? expandAgentExecutionHistoryStatusFilter(input.status)
+        : null;
+    const decisions = input.decision && input.decision !== "all" ? input.decision : null;
+
+    const where = buildHistoryWhere({
+      agentIds,
+      cursor: input.cursor ?? null,
+      statuses,
+      decisions,
+      order,
+    });
+
+    const records = await client.agentExecution.findMany({
+      where,
+      orderBy: [
+        { startedAt: order },
+        { id: order },
+      ],
+      take: limit + 1,
+      select: EXECUTION_LIST_SELECT,
+    });
+
+    const hasMore = records.length > limit;
+    const pageRecords = hasMore ? records.slice(0, limit) : records;
+    const executions = pageRecords.map((record) => this.mapExecutionSummary(record));
+    const lastRecord = pageRecords[pageRecords.length - 1];
+
+    return {
+      executions,
+      nextCursor: hasMore && lastRecord ? encodeHistoryCursor(lastRecord) : null,
+      hasMore,
+    };
+  }
+
   private async updateExecution(
     executionId: string,
     nextStatus: AgentExecutionStatus,
@@ -594,6 +699,40 @@ export class AgentExecutionRepository {
       completedAt,
     };
   }
+
+  private mapExecutionSummary(execution: PrismaLikeRecord): AgentExecutionSummary {
+    const reasoning = normalizeReasoning(execution.reasoning);
+    const purchase = reasoning?.purchase ?? null;
+    const failure = reasoning?.failure ?? null;
+    const selectedResource = reasoning?.selectedResource ?? null;
+    const startedAt = toIsoString(execution.startedAt);
+    const completedAt = toOptionalIsoString(execution.completedAt);
+
+    return {
+      id: String(execution.id),
+      goal: String(execution.goal ?? ""),
+      status: String(execution.status ?? "CREATED") as AgentExecutionStatus,
+      decision: isRecommendationDecision(execution.decision) ? execution.decision : null,
+      selectedResourceId:
+        typeof execution.selectedResourceId === "string" && execution.selectedResourceId.trim().length > 0
+          ? execution.selectedResourceId
+          : null,
+      selectedResourceTitle: selectedResource?.title ?? null,
+      estimatedCostUSDC: normalizeOptionalNumber(execution.estimatedCostUSDC),
+      txHash:
+        typeof execution.txHash === "string" && execution.txHash.trim().length > 0
+          ? execution.txHash
+          : null,
+      createdAt: startedAt,
+      updatedAt: completedAt ?? startedAt,
+      completedAt,
+      failureCode: failure?.code ?? null,
+      failureStage: failure?.stage ?? null,
+      purchaseStatus: purchase?.status ?? "NOT_STARTED",
+      settlementStatus: purchase?.settlementStatus ?? "NOT_STARTED",
+      unlockStatus: purchase?.unlockStatus ?? "NOT_STARTED",
+    };
+  }
 }
 
 function normalizeReasoning(value: unknown): SerializableExecutionReasoning | null {
@@ -668,4 +807,66 @@ function serializeTraceableCandidates(
   candidates: readonly SerializableCandidateEvaluationSnapshot[],
 ) {
   return candidates.map((candidate) => serializeCandidateEvaluationSnapshot(candidate));
+}
+
+function normalizeHistoryLimit(value: number | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return 10;
+  }
+
+  return Math.max(1, Math.min(20, Math.floor(value)));
+}
+
+function buildHistoryWhere(params: {
+  agentIds: string[];
+  cursor: AgentExecutionHistoryCursor | null;
+  statuses: readonly AgentExecutionStatus[] | null;
+  decisions: AgentExecutionHistoryDecisionFilter | null;
+  order: "asc" | "desc";
+}) {
+  const where: Record<string, unknown> = {
+    agentId: { in: params.agentIds },
+  };
+
+  if (params.statuses && params.statuses.length > 0) {
+    where.status = { in: params.statuses };
+  }
+
+  if (params.decisions && params.decisions !== "all") {
+    where.decision = params.decisions;
+  }
+
+  if (params.cursor) {
+    const cursorDate = new Date(params.cursor.startedAt);
+    where.OR =
+      params.order === "desc"
+        ? [
+            { startedAt: { lt: cursorDate } },
+            { startedAt: cursorDate, id: { lt: params.cursor.id } },
+          ]
+        : [
+            { startedAt: { gt: cursorDate } },
+            { startedAt: cursorDate, id: { gt: params.cursor.id } },
+          ];
+  }
+
+  return where;
+}
+
+function encodeHistoryCursor(execution: PrismaLikeRecord) {
+  return base64UrlEncode(
+    JSON.stringify({
+      startedAt: toIsoString(execution.startedAt),
+      id: String(execution.id),
+    }),
+  );
+}
+
+function base64UrlEncode(input: string | Uint8Array) {
+  const buffer = typeof input === "string" ? Buffer.from(input, "utf8") : Buffer.from(input);
+  return buffer
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }

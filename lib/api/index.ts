@@ -28,6 +28,7 @@ export type AgentExecutionReadResponse = {
   execution: {
     id: string;
     status: string;
+    agentId: string;
     goal: unknown;
     decision: string | null;
     policy: unknown;
@@ -43,13 +44,48 @@ export type AgentExecutionReadResponse = {
       amountUSDC: number | null;
       transactionId: string | null;
       resourceId: string | null;
-      settlementVerified: boolean;
       settlementStatus: string;
-      unlocked: boolean;
       unlockStatus: string;
     } | null;
+    failure: {
+      code: string;
+      message: string;
+      stage: string | null;
+    } | null;
+    estimatedCostUSDC: number | null;
+    txHash: string | null;
+    startedAt: string;
     createdAt: string;
+    updatedAt: string;
     completedAt: string | null;
+  };
+};
+
+export type AgentExecutionSummaryResponse = {
+  id: string;
+  goal: string;
+  status: string;
+  decision: string | null;
+  selectedResourceId: string | null;
+  selectedResourceTitle: string | null;
+  estimatedCostUSDC: number | null;
+  txHash: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  failureCode: string | null;
+  failureStage: string | null;
+  purchaseStatus: string;
+  settlementStatus: string;
+  unlockStatus: string;
+};
+
+export type AgentExecutionListResponse = {
+  ok: true;
+  executions: AgentExecutionSummaryResponse[];
+  pageInfo: {
+    nextCursor: string | null;
+    hasMore: boolean;
   };
 };
 
@@ -154,6 +190,24 @@ export async function getAgentExecution(
   executionId: string,
 ): Promise<AgentExecutionReadResponse> {
   return apiFetch<AgentExecutionReadResponse>(`/api/agent/executions/${executionId}`);
+}
+
+export async function getAgentExecutions(params?: {
+  cursor?: string;
+  limit?: number;
+  status?: string;
+  decision?: string;
+}): Promise<AgentExecutionListResponse> {
+  const search = new URLSearchParams();
+  if (params?.cursor) search.set("cursor", params.cursor);
+  if (typeof params?.limit === "number") search.set("limit", String(params.limit));
+  if (params?.status) search.set("status", params.status);
+  if (params?.decision) search.set("decision", params.decision);
+
+  const query = search.toString();
+  return apiFetch<AgentExecutionListResponse>(
+    `/api/agent/executions${query ? `?${query}` : ""}`,
+  );
 }
 
 export async function postAgentExecutionBeginApproval(

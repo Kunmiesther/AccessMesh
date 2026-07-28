@@ -150,3 +150,63 @@ export type AgentExecutionRecord = Readonly<{
   startedAt: string;
   completedAt: string | null;
 }>;
+
+export type AgentExecutionSummary = Readonly<{
+  id: string;
+  goal: string;
+  status: AgentExecutionStatus;
+  decision: AgentRecommendationDecision | null;
+  selectedResourceId: string | null;
+  selectedResourceTitle: string | null;
+  estimatedCostUSDC: number | null;
+  txHash: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  failureCode: string | null;
+  failureStage: string | null;
+  purchaseStatus: AgentPurchaseStatus;
+  settlementStatus: AgentSettlementStatus;
+  unlockStatus: AgentUnlockStatus;
+}>;
+
+export type AgentExecutionHistoryPage = Readonly<{
+  executions: AgentExecutionSummary[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}>;
+
+export type AgentExecutionDetailView = Readonly<{
+  id: string;
+  agentId: string;
+  status: AgentExecutionStatus;
+  decision: AgentRecommendationDecision | null;
+  goal: SerializableGoalSnapshot | null;
+  policy: SerializablePolicySnapshot | null;
+  normalizedGoal: string | null;
+  candidateCount: number;
+  comparisonSummary: SerializableCandidateComparisonSummary | null;
+  selectedResource: SerializableResourceSnapshot | null;
+  selectedEvaluation: SerializableCandidateEvaluationSnapshot | null;
+  candidates: SerializableCandidateEvaluationSnapshot[];
+  trace: SerializableTraceEntry[];
+  purchase: Readonly<{
+    status: AgentPurchaseStatus;
+    amountUSDC: number | null;
+    transactionId: string | null;
+    resourceId: string | null;
+    settlementStatus: AgentSettlementStatus;
+    unlockStatus: AgentUnlockStatus;
+  }> | null;
+  failure: Readonly<{
+    code: string;
+    message: string;
+    stage: string | null;
+  }> | null;
+  estimatedCostUSDC: number | null;
+  txHash: string | null;
+  startedAt: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}>;

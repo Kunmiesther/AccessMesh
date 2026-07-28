@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getOwnedAgentExecution } from "@/lib/auth/requireOwnedAgentExecution";
 import { getAgentOwnerFromRequest } from "@/lib/auth/requireAgentOwner";
 import { AgentExecutionRepository } from "@/services/agent/AgentExecutionRepository";
+import { buildAgentExecutionDetailView } from "@/services/agent/AgentExecutionViews";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,39 +39,10 @@ export async function GET(
     );
   }
 
-  const execution = owned.execution;
-  const reasoning = execution.reasoning;
-  const purchase = reasoning?.purchase ?? null;
+  const execution = buildAgentExecutionDetailView(owned.execution);
 
   return NextResponse.json({
     ok: true,
-    execution: {
-      id: execution.id,
-      status: execution.status,
-      goal: reasoning?.goal ?? execution.goal,
-      decision: execution.decision,
-      policy: reasoning?.policy ?? null,
-      normalizedGoal: reasoning?.normalizedGoal ?? null,
-      candidateCount: reasoning?.candidateCount ?? 0,
-      comparisonSummary: reasoning?.comparisonSummary ?? null,
-      selectedResource: reasoning?.selectedResource ?? null,
-      selectedEvaluation: reasoning?.selectedEvaluation ?? null,
-      candidates: reasoning?.candidateSummaries ?? [],
-      trace: reasoning?.trace ?? [],
-      purchase: purchase
-        ? {
-            status: purchase.status,
-            amountUSDC: purchase.amountUSDC,
-            transactionId: purchase.transactionId,
-            resourceId: purchase.resourceId,
-            settlementVerified: purchase.settlementStatus === "SETTLED",
-            settlementStatus: purchase.settlementStatus,
-            unlocked: purchase.unlockStatus === "UNLOCKED",
-            unlockStatus: purchase.unlockStatus,
-          }
-        : null,
-      createdAt: execution.startedAt,
-      completedAt: execution.completedAt,
-    },
+    execution,
   });
 }

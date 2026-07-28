@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Navbar } from "@/components/Navbar";
 import { AGENT_LOADING_STAGES, DEFAULT_AGENT_FORM, DEFAULT_AGENT_RESOURCE_LIMIT, type AgentComposerFields } from "./types";
@@ -159,6 +160,11 @@ export function ResearchAgentPage() {
               <span style={chipStyle}>Recommendation only</span>
               <span style={chipStyle}>No payment execution</span>
               <span style={chipStyle}>Scans up to 50 resources</span>
+            </div>
+            <div style={heroActionRowStyle}>
+              <Link href="/agent/history" style={secondaryActionButtonStyle}>
+                View agent history
+              </Link>
             </div>
           </div>
 
@@ -350,6 +356,12 @@ const chipRowStyle = {
   gap: 8,
 } as const;
 
+const heroActionRowStyle = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+} as const;
+
 const chipStyle = {
   fontFamily: "var(--font-mono)",
   fontSize: 11,
@@ -358,6 +370,21 @@ const chipStyle = {
   border: "1px solid var(--border)",
   background: "rgba(255,255,255,0.03)",
   padding: "8px 10px",
+} as const;
+
+const secondaryActionButtonStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  borderRadius: 12,
+  border: "1px solid var(--border)",
+  background: "rgba(255,255,255,0.03)",
+  color: "var(--text-secondary)",
+  padding: "10px 14px",
+  textDecoration: "none",
+  fontFamily: "var(--font-mono)",
+  fontSize: 12,
+  fontWeight: 700,
 } as const;
 
 const heroAsideStyle = {

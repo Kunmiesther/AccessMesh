@@ -9,6 +9,12 @@ export class UnauthorizedAgentOwnerError extends Error {
 
 export function getAgentOwnerFromRequest(request: Request): AuthenticatedOwner | null {
   const cookieHeader = request.headers.get("cookie");
+  return getAgentOwnerFromCookieHeader(cookieHeader);
+}
+
+export function getAgentOwnerFromCookieHeader(
+  cookieHeader: string | null,
+): AuthenticatedOwner | null {
   if (!cookieHeader) {
     return null;
   }
