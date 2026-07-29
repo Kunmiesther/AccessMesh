@@ -6,6 +6,7 @@ import {
   formatUSDC,
 } from "@/lib/ui";
 import type { AgentExecutionDetailView } from "@/services/agent/AgentExecutionTypes";
+import type { AgentBudgetReservationView } from "@/services/agent/AgentBudgetTypes";
 import { AgentDecisionBadge } from "./AgentDecisionBadge";
 import { AgentExecutionStatusBadge } from "./AgentExecutionStatusBadge";
 import { AgentExecutionTimeline } from "./AgentExecutionTimeline";
@@ -15,8 +16,10 @@ import { AgentApprovalDecisionPanel } from "../approvals/AgentApprovalDecisionPa
 
 export function AgentExecutionDetailPanel({
   execution,
+  budgetReservation,
 }: {
   execution: AgentExecutionDetailView;
+  budgetReservation?: AgentBudgetReservationView | null;
 }) {
   const statusPresentation = getExecutionStatusPresentation(execution.status);
   const isBuy = execution.decision === "BUY";
@@ -56,6 +59,9 @@ export function AgentExecutionDetailPanel({
           </Link>
           <Link href="/agent/policies" style={secondaryLinkStyle}>
             View policies
+          </Link>
+          <Link href="/agent/budgets" style={secondaryLinkStyle}>
+            View budgets
           </Link>
           <Link href="/agent" style={primaryLinkStyle}>
             Open Research Agent
@@ -155,6 +161,49 @@ export function AgentExecutionDetailPanel({
           />
         </div>
       </section>
+
+      {budgetReservation ? (
+        <section style={contentPanelStyle} aria-label="Budget">
+          <SectionHeader
+            eyebrow="Budget"
+            title="Policy reservation"
+            copy="The reservation ledger is authoritative for this execution. Committed spend remains committed once payment is submitted."
+          />
+
+          <div style={definitionGridStyle}>
+            <Definition
+              label="Policy"
+              value={`${budgetReservation.policyName} ${budgetReservation.policyVersion ? `v${budgetReservation.policyVersion}` : ""}`.trim()}
+            />
+            <Definition
+              label="Period"
+              value={`${formatDateTime(budgetReservation.periodStart)} - ${formatDateTime(budgetReservation.periodEnd)}`}
+              title={`${budgetReservation.periodStart} - ${budgetReservation.periodEnd}`}
+            />
+            <Definition label="Reservation" value={budgetReservation.status} />
+            <Definition label="Amount reserved" value={formatUSDC(Number(budgetReservation.amountUSDC))} />
+            <Definition
+              label="Expires"
+              value={budgetReservation.expiresAt ? formatDateTime(budgetReservation.expiresAt) : "Not set"}
+              title={budgetReservation.expiresAt ?? undefined}
+            />
+            <Definition
+              label="Committed at"
+              value={budgetReservation.committedAt ? formatDateTime(budgetReservation.committedAt) : "Not committed"}
+              title={budgetReservation.committedAt ?? undefined}
+            />
+            <Definition
+              label="Released at"
+              value={budgetReservation.releasedAt ? formatDateTime(budgetReservation.releasedAt) : "Not released"}
+              title={budgetReservation.releasedAt ?? undefined}
+            />
+            <Definition
+              label="Release reason"
+              value={budgetReservation.releaseReason ?? "Unavailable"}
+            />
+          </div>
+        </section>
+      ) : null}
 
       <section style={contentPanelStyle} aria-label="Recommendation">
         <SectionHeader

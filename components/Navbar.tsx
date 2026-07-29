@@ -108,6 +108,9 @@ export function Navbar() {
           <Link href="/agent/policies" style={navLinkStyle}>
             Policies
           </Link>
+          <Link href="/agent/budgets" style={navLinkStyle}>
+            Budgets
+          </Link>
           <Link href="/agent/notifications" style={navLinkStyle}>
             Notifications
             {unreadNotifications && unreadNotifications > 0 ? <Badge count={unreadNotifications} /> : null}

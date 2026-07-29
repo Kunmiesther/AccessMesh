@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { jsonError } from "@/lib/http";
 import { getAgentOwnerFromRequest } from "@/lib/auth/requireAgentOwner";
 import { getOwnedAgentExecution } from "@/lib/auth/requireOwnedAgentExecution";
-import { AgentApprovalConflictError, AgentApprovalRepository } from "@/services/agent/AgentApprovalRepository";
+import { AgentBudgetConflictError } from "@/services/agent/AgentBudgetRepository";
 import { AgentBudgetService } from "@/services/agent/AgentBudgetService";
 import { AgentExecutionRepository } from "@/services/agent/AgentExecutionRepository";
+import { InputError } from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,35 +30,23 @@ export async function POST(
     return jsonError(404, "EXECUTION_NOT_FOUND", "execution not found");
   }
 
-  const repository = new AgentExecutionRepository();
-  const approvalRepository = new AgentApprovalRepository();
   const budgetService = new AgentBudgetService();
-
   try {
-    const approvalRecord = await approvalRepository.getApprovalForExecution(owner.ownerId, id);
-    if (!approvalRecord) {
-      return jsonError(404, "APPROVAL_NOT_FOUND", "approval not found");
-    }
-
-    const approval = await approvalRepository.rejectExecution(approvalRecord.id, owner.ownerId, {
-      reasonCode: "NO_LONGER_NEEDED",
-      reasonText: null,
-    });
-
-    if (!approval) {
-      return jsonError(404, "APPROVAL_NOT_FOUND", "approval not found");
-    }
-
-    const execution = await repository.cancelAwaitingApproval(id);
-    await budgetService.cancelPaymentPreparation(owner.ownerId, id).catch(() => {});
+    const result = await budgetService.preparePaymentForExecution(owner.ownerId, id);
 
     return NextResponse.json({
       ok: true,
-      execution,
+      budget: result.bucket,
+      reservation: result.reservation,
+      activity: result.activity ?? null,
     });
   } catch (error) {
-    if (error instanceof AgentApprovalConflictError) {
-      return jsonError(409, "APPROVAL_CONFLICT", error.message);
+    if (error instanceof InputError) {
+      return jsonError(400, "INVALID_PREPARE_PAYMENT", error.message);
+    }
+
+    if (error instanceof AgentBudgetConflictError) {
+      return jsonError(409, "BUDGET_CONFLICT", error.message);
     }
 
     throw error;

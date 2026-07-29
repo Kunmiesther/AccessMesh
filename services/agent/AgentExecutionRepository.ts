@@ -522,6 +522,41 @@ export class AgentExecutionRepository {
     return execution ? this.mapExecution(execution) : null;
   }
 
+  async getExecutionForOwner(
+    ownerId: string,
+    executionId: string,
+  ): Promise<AgentExecutionRecord | null> {
+    const client = await this.getClient();
+    const user = await client.user.findUnique({
+      where: { id: ownerId },
+      select: { walletAddress: true },
+    });
+
+    if (!user) {
+      return null;
+    }
+
+    const execution = await client.agentExecution.findUnique({
+      where: { id: executionId },
+      select: {
+        ...EXECUTION_SELECT,
+        agent: {
+          select: {
+            id: true,
+            ownerWallet: true,
+          },
+        },
+      } as never,
+    });
+
+    const executionAgentWallet = (execution as { agent?: { ownerWallet?: string } }).agent?.ownerWallet ?? "";
+    if (!execution || executionAgentWallet !== user.walletAddress) {
+      return null;
+    }
+
+    return this.mapExecution(execution);
+  }
+
   async listExecutionsForOwner(input: {
     ownerId: string;
     limit?: number;

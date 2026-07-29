@@ -6,6 +6,7 @@ import { AgentExecutionDetailPanel } from "@/components/agent/history/AgentExecu
 import { getAgentOwnerFromCookieHeader } from "@/lib/auth/requireAgentOwner";
 import { prisma } from "@/lib/prisma";
 import { AgentApprovalRepository } from "@/services/agent/AgentApprovalRepository";
+import { AgentBudgetService } from "@/services/agent/AgentBudgetService";
 import { AgentExecutionRepository } from "@/services/agent/AgentExecutionRepository";
 import { buildAgentExecutionDetailView } from "@/services/agent/AgentExecutionViews";
 
@@ -93,8 +94,17 @@ async function ExecutionContent({
     ownerId,
     executionId,
   );
+  const budgetReservation = await new AgentBudgetService().getReservationForExecution(
+    ownerId,
+    executionId,
+  );
 
-  return <AgentExecutionDetailPanel execution={buildAgentExecutionDetailView(execution, approval)} />;
+  return (
+    <AgentExecutionDetailPanel
+      execution={buildAgentExecutionDetailView(execution, approval)}
+      budgetReservation={budgetReservation}
+    />
+  );
 }
 
 function StatePanel({

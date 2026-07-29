@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { jsonError } from "@/lib/http";
 import { getAgentOwnerFromRequest } from "@/lib/auth/requireAgentOwner";
 import { getOwnedAgentExecution } from "@/lib/auth/requireOwnedAgentExecution";
+import { AgentBudgetConflictError } from "@/services/agent/AgentBudgetRepository";
+import { AgentBudgetService } from "@/services/agent/AgentBudgetService";
 import { AgentApprovalRepository } from "@/services/agent/AgentApprovalRepository";
 import { AgentExecutionRepository } from "@/services/agent/AgentExecutionRepository";
 import { AgentNotificationRepository } from "@/services/agent/AgentNotificationRepository";
@@ -42,6 +44,7 @@ export async function POST(
 
   const repository = new AgentExecutionRepository();
   const approvalRepository = new AgentApprovalRepository();
+  const budgetService = new AgentBudgetService();
   try {
     const approval = await approvalRepository.getApprovalForExecution(owner.ownerId, id);
     if (!approval) {
@@ -51,6 +54,13 @@ export async function POST(
     if (approval.approvalStatus !== "APPROVED") {
       return jsonError(409, "APPROVAL_REQUIRED", "approval must be approved before payment can be submitted");
     }
+
+    await budgetService.finalizePaymentSubmission(owner.ownerId, id, {
+      transactionId,
+      amountUSDC,
+      resourceId,
+      resourceTitle,
+    });
 
     const execution = await repository.recordPaymentSubmitted(id, {
       transactionId,
@@ -77,6 +87,10 @@ export async function POST(
   } catch (error) {
     if (error instanceof InputError) {
       return jsonError(400, "INVALID_PAYMENT", error.message);
+    }
+
+    if (error instanceof AgentBudgetConflictError) {
+      return jsonError(409, "BUDGET_CONFLICT", error.message);
     }
 
     throw error;

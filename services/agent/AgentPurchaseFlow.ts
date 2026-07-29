@@ -3,6 +3,8 @@ import { arcExplorerTxUrl } from "@/lib/ui";
 import {
   postAgentExecutionFailure,
   postAgentExecutionCancelApproval,
+  postAgentExecutionCancelPaymentPreparation,
+  postAgentExecutionPreparePayment,
   postAgentExecutionPaymentSubmitted,
   postAgentExecutionSettlementVerification,
   postUnlock,
@@ -73,6 +75,8 @@ export type AgentPurchaseFlowInput = {
   accessIntent: PaymentIntent | null;
   executionId?: string | null;
   onStage?: (stage: AgentPurchaseStageUpdate) => void;
+  preparePayment?: (executionId: string) => Promise<unknown>;
+  cancelPaymentPreparation?: (executionId: string) => Promise<unknown>;
   submitPayment?: typeof submitUsdcPayment;
   confirmPayment?: typeof confirmUsdcPayment;
   unlockResource?: typeof postUnlock;
@@ -187,6 +191,7 @@ export async function executeAgentPurchaseFlow(
   const accessIntent = params.accessIntent as PaymentIntent;
   const bundlerClient = params.bundlerClient;
   let paymentSubmitted = false;
+  let paymentPrepared = false;
   let currentStage: AgentPurchaseStage = "REVIEWING";
 
   if (!bundlerClient || !bundlerClient.account) {
@@ -202,6 +207,12 @@ export async function executeAgentPurchaseFlow(
       phase: "PREPARING_PAYMENT",
       message: "Preparing payment transfers.",
     });
+
+    if (params.executionId) {
+      paymentPrepared = true;
+      await (params.preparePayment ?? postAgentExecutionPreparePayment)(params.executionId);
+    }
+
     currentStage = "SUBMITTING_PAYMENT";
     params.onStage?.({
       phase: "SUBMITTING_PAYMENT",
@@ -301,12 +312,20 @@ export async function executeAgentPurchaseFlow(
 
       if (!paymentSubmitted && failure === "APPROVAL_REJECTED") {
         await postAgentExecutionCancelApproval(params.executionId).catch(() => {});
-      } else if (paymentSubmitted || failure !== "APPROVAL_REJECTED") {
-        await postAgentExecutionFailure(params.executionId, {
-          code: failure,
-          message: getPurchaseErrorMessage(error),
-          stage: currentStage,
-        }).catch(() => {});
+      } else {
+        if (paymentPrepared && !paymentSubmitted) {
+          await (params.cancelPaymentPreparation ?? postAgentExecutionCancelPaymentPreparation)(
+            params.executionId,
+          ).catch(() => {});
+        }
+
+        if (paymentSubmitted || failure !== "APPROVAL_REJECTED") {
+          await postAgentExecutionFailure(params.executionId, {
+            code: failure,
+            message: getPurchaseErrorMessage(error),
+            stage: currentStage,
+          }).catch(() => {});
+        }
       }
     }
 

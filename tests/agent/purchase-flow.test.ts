@@ -143,76 +143,149 @@ test("rejects a non-BUY recommendation", async () => {
 
 test("executes the trusted payment and unlock path on success", async () => {
   const stages: string[] = [];
+  const sequence: string[] = [];
   let submitted = 0;
   let confirmed = 0;
   let unlocked = 0;
+  const calls: string[] = [];
+  const originalFetch = globalThis.fetch;
 
-  const outcome = await executeAgentPurchaseFlow({
-    result,
-    policy,
-    walletAddress,
-    bundlerClient: { account: { address: walletAddress } } as never,
-    accessIntent: accessIntent as never,
-    onStage: ({ phase }) => {
-      stages.push(phase);
-    },
-    submitPayment: async () => {
-      submitted += 1;
-      return "0xaaaa" as never;
-    },
-    confirmPayment: async () => {
-      confirmed += 1;
-      return {
-        status: "confirmed",
-        userOpHash: "0xaaaa",
-        transactionHash: "0xbbbb",
-      } as never;
-    },
-    unlockResource: async () => {
-      unlocked += 1;
-      return {
-        ok: true,
-        access: "UNLOCKED",
-        expiresAt: "2026-07-24T02:00:00.000Z",
-        resourceId: selectedResourceId,
-        resource: accessIntent.resource,
-        txHash: "0xbbbb",
-        purchase: {
-          id: "purchase-1",
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input.toString();
+    calls.push(url);
+
+    if (url.includes("/api/agent/executions/execution-1/payment-submitted")) {
+      return new Response(JSON.stringify({ ok: true, execution: { id: "execution-1" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+
+    if (url.includes("/api/agent/executions/execution-1/settlement-verification")) {
+      return new Response(JSON.stringify({ ok: true, execution: { id: "execution-1" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+
+    if (url.includes("/api/access/unlock")) {
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          access: "UNLOCKED",
+          expiresAt: "2026-07-24T02:00:00.000Z",
           resourceId: selectedResourceId,
-          resourceTitle: selectedResourceTitle,
-          buyerWallet: walletAddress,
-          creatorWallet: walletAddress,
-          amountUSDC: 0.2,
+          resource: accessIntent.resource,
           txHash: "0xbbbb",
-          creatorDisplayName: null,
-          timestamp: "2026-07-24T00:00:00.000Z",
+          purchase: {
+            id: "purchase-1",
+            resourceId: selectedResourceId,
+            resourceTitle: selectedResourceTitle,
+            buyerWallet: walletAddress,
+            creatorWallet: walletAddress,
+            amountUSDC: 0.2,
+            txHash: "0xbbbb",
+            creatorDisplayName: null,
+            timestamp: "2026-07-24T00:00:00.000Z",
+          },
+          verification: {
+            status: "SETTLED",
+            settled: true,
+            txHash: "0xbbbb",
+          },
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
         },
-        verification: {
-          status: "SETTLED",
-          settled: true,
-          txHash: "0xbbbb",
-        },
-      } as never;
-    },
-  });
+      );
+    }
 
-  assert.equal(outcome.ok, true);
-  assert.equal(submitted, 1);
-  assert.equal(confirmed, 1);
-  assert.equal(unlocked, 1);
-  assert.deepEqual(stages, [
-    "PREPARING_PAYMENT",
-    "SUBMITTING_PAYMENT",
-    "VERIFYING_SETTLEMENT",
-    "UNLOCKING_RESOURCE",
-    "COMPLETED",
-  ]);
-  if (outcome.ok) {
-    assert.equal(outcome.completion.resourceId, selectedResourceId);
-    assert.equal(outcome.completion.resourceTitle, selectedResourceTitle);
-    assert.equal(outcome.completion.unlocked, true);
-    assert.match(outcome.completion.explorerUrl ?? "", /0xbbbb/i);
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  try {
+    const outcome = await executeAgentPurchaseFlow({
+      result,
+      policy,
+      walletAddress,
+      bundlerClient: { account: { address: walletAddress } } as never,
+      accessIntent: accessIntent as never,
+      executionId: "execution-1",
+      onStage: ({ phase }) => {
+        stages.push(phase);
+      },
+      preparePayment: async () => {
+        sequence.push("prepare");
+      },
+      submitPayment: async () => {
+        sequence.push("submit");
+        submitted += 1;
+        return "0xaaaa" as never;
+      },
+      confirmPayment: async () => {
+        confirmed += 1;
+        return {
+          status: "confirmed",
+          userOpHash: "0xaaaa",
+          transactionHash: "0xbbbb",
+        } as never;
+      },
+      unlockResource: async () => {
+        sequence.push("unlock");
+        unlocked += 1;
+        return {
+          ok: true,
+          access: "UNLOCKED",
+          expiresAt: "2026-07-24T02:00:00.000Z",
+          resourceId: selectedResourceId,
+          resource: accessIntent.resource,
+          txHash: "0xbbbb",
+          purchase: {
+            id: "purchase-1",
+            resourceId: selectedResourceId,
+            resourceTitle: selectedResourceTitle,
+            buyerWallet: walletAddress,
+            creatorWallet: walletAddress,
+            amountUSDC: 0.2,
+            txHash: "0xbbbb",
+            creatorDisplayName: null,
+            timestamp: "2026-07-24T00:00:00.000Z",
+          },
+          verification: {
+            status: "SETTLED",
+            settled: true,
+            txHash: "0xbbbb",
+          },
+        } as never;
+      },
+    });
+
+    assert.equal(outcome.ok, true);
+    assert.equal(submitted, 1);
+    assert.equal(confirmed, 1);
+    assert.equal(unlocked, 1);
+    assert.deepEqual(sequence, ["prepare", "submit", "unlock"]);
+    assert.deepEqual(stages, [
+      "PREPARING_PAYMENT",
+      "SUBMITTING_PAYMENT",
+      "VERIFYING_SETTLEMENT",
+      "UNLOCKING_RESOURCE",
+      "COMPLETED",
+    ]);
+    if (outcome.ok) {
+      assert.equal(outcome.completion.resourceId, selectedResourceId);
+      assert.equal(outcome.completion.resourceTitle, selectedResourceTitle);
+      assert.equal(outcome.completion.unlocked, true);
+      assert.match(outcome.completion.explorerUrl ?? "", /0xbbbb/i);
+    }
+    assert.ok(calls.some((call) => call.includes("/api/agent/executions/execution-1/payment-submitted")));
+    assert.ok(calls.some((call) => call.includes("/api/agent/executions/execution-1/settlement-verification")));
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 
@@ -306,6 +379,36 @@ test("purchase flow carries the executionId through trusted lifecycle writes", a
     assert.equal((unlockCall?.body as { executionId?: string | null } | null)?.executionId, "execution-1");
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("failed payment preparation releases the reservation before failure handling", async () => {
+  const calls: string[] = [];
+
+  const outcome = await executeAgentPurchaseFlow({
+    result,
+    policy,
+    walletAddress,
+    bundlerClient: { account: { address: walletAddress } } as never,
+    accessIntent: accessIntent as never,
+    executionId: "execution-1",
+    preparePayment: async () => {
+      calls.push("prepare");
+      throw new Error("budget reservation could not be created");
+    },
+    cancelPaymentPreparation: async () => {
+      calls.push("cancel");
+    },
+    submitPayment: async () => {
+      calls.push("submit");
+      return "0xaaaa" as never;
+    },
+  });
+
+  assert.equal(outcome.ok, false);
+  assert.deepEqual(calls, ["prepare", "cancel"]);
+  if (!outcome.ok) {
+    assert.equal(outcome.reason, "UNKNOWN");
   }
 });
 

@@ -221,6 +221,28 @@ export async function postAgentExecutionBeginApproval(
   );
 }
 
+export async function postAgentExecutionPreparePayment(
+  executionId: string,
+): Promise<AgentExecutionWriteResponse> {
+  return apiFetch<AgentExecutionWriteResponse>(
+    `/api/agent/executions/${executionId}/prepare-payment`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export async function postAgentExecutionCancelPaymentPreparation(
+  executionId: string,
+): Promise<AgentExecutionWriteResponse> {
+  return apiFetch<AgentExecutionWriteResponse>(
+    `/api/agent/executions/${executionId}/cancel-payment-preparation`,
+    {
+      method: "POST",
+    },
+  );
+}
+
 export async function postAgentExecutionCancelApproval(
   executionId: string,
 ): Promise<AgentExecutionWriteResponse> {

@@ -90,6 +90,9 @@ async function NotificationsContent({
           <Link href="/agent/policies" style={navigationLinkStyle}>
             Policies
           </Link>
+          <Link href="/agent/budgets" style={navigationLinkStyle}>
+            Budgets
+          </Link>
         </div>
       </section>
 

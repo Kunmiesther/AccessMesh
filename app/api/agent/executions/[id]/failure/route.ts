@@ -4,6 +4,7 @@ import { getAgentOwnerFromRequest } from "@/lib/auth/requireAgentOwner";
 import { getOwnedAgentExecution } from "@/lib/auth/requireOwnedAgentExecution";
 import { AgentNotificationRepository } from "@/services/agent/AgentNotificationRepository";
 import { AgentExecutionRepository } from "@/services/agent/AgentExecutionRepository";
+import { AgentBudgetService } from "@/services/agent/AgentBudgetService";
 import { InputError } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -43,12 +44,15 @@ export async function POST(
   }
 
   const repository = new AgentExecutionRepository();
+  const budgetService = new AgentBudgetService();
   try {
     const execution = await repository.failExecution(id, {
       code,
       message,
       ...(stage ? { stage } : {}),
     });
+
+    await budgetService.cancelPaymentPreparation(owner.ownerId, id).catch(() => {});
 
     await new AgentNotificationRepository().ensureNotification({
       ownerId: owner.ownerId,

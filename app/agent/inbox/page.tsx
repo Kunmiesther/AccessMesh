@@ -97,6 +97,9 @@ async function InboxContent({
           <Link href="/agent/notifications" style={navigationLinkStyle}>
             Notifications
           </Link>
+          <Link href="/agent/budgets" style={navigationLinkStyle}>
+            Budgets
+          </Link>
         </div>
       </section>
 

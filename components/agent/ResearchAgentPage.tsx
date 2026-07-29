@@ -316,6 +316,9 @@ export function ResearchAgentPage() {
               <Link href="/agent/policies" style={secondaryActionButtonStyle}>
                 View policies
               </Link>
+              <Link href="/agent/budgets" style={secondaryActionButtonStyle}>
+                View budgets
+              </Link>
             </div>
           </div>
 
