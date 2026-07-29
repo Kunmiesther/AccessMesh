@@ -5,6 +5,7 @@ import { Navbar } from "@/components/Navbar";
 import { AgentExecutionDetailPanel } from "@/components/agent/history/AgentExecutionDetailView";
 import { getAgentOwnerFromCookieHeader } from "@/lib/auth/requireAgentOwner";
 import { prisma } from "@/lib/prisma";
+import { AgentApprovalRepository } from "@/services/agent/AgentApprovalRepository";
 import { AgentExecutionRepository } from "@/services/agent/AgentExecutionRepository";
 import { buildAgentExecutionDetailView } from "@/services/agent/AgentExecutionViews";
 
@@ -38,7 +39,11 @@ export default async function AgentExecutionPage({
             actionLabel="Back to history"
           />
         ) : (
-          <ExecutionContent ownerWallet={owner.walletAddress} executionId={executionId} />
+          <ExecutionContent
+            ownerId={owner.ownerId}
+            ownerWallet={owner.walletAddress}
+            executionId={executionId}
+          />
         )}
       </main>
     </div>
@@ -46,9 +51,11 @@ export default async function AgentExecutionPage({
 }
 
 async function ExecutionContent({
+  ownerId,
   ownerWallet,
   executionId,
 }: {
+  ownerId: string;
   ownerWallet: string;
   executionId: string;
 }) {
@@ -82,7 +89,12 @@ async function ExecutionContent({
     );
   }
 
-  return <AgentExecutionDetailPanel execution={buildAgentExecutionDetailView(execution)} />;
+  const approval = await new AgentApprovalRepository().getApprovalForExecution(
+    ownerId,
+    executionId,
+  );
+
+  return <AgentExecutionDetailPanel execution={buildAgentExecutionDetailView(execution, approval)} />;
 }
 
 function StatePanel({

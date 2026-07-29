@@ -10,10 +10,33 @@ import type {
   SerializableResourceSnapshot,
   SerializableTraceEntry,
 } from "./AgentExecutionTypes";
+import type {
+  AgentApprovalDetailView,
+  AgentApprovalDecision,
+  AgentApprovalSource,
+  AgentApprovalStatus,
+  AgentApprovalRejectionReason,
+} from "./AgentApprovalTypes";
+import { toAgentApprovalSummary } from "./AgentApprovalViews";
 type ExecutionReasoning = SerializableExecutionReasoning;
+
+type AgentApprovalRow = Readonly<{
+  id: string;
+  executionId: string;
+  ownerId: string;
+  status: string;
+  decision: string | null;
+  reasonCode: string | null;
+  reasonText: string | null;
+  expiresAt: Date | string | null;
+  decidedAt: Date | string | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}>;
 
 export function buildAgentExecutionSummary(
   execution: AgentExecutionRecord,
+  approval: AgentApprovalRow | null = null,
 ): AgentExecutionSummary {
   const reasoning = getExecutionReasoning(execution.reasoning);
   const purchase = reasoning?.purchase ?? null;
@@ -21,6 +44,7 @@ export function buildAgentExecutionSummary(
   const selectedResource = reasoning?.selectedResource ?? null;
   const policy = reasoning?.policy ?? null;
   const updatedAt = execution.completedAt ?? execution.startedAt;
+  const approvalView = approval ? buildApprovalView(approval, execution) : null;
 
   return {
     id: execution.id,
@@ -42,16 +66,24 @@ export function buildAgentExecutionSummary(
     purchaseStatus: purchase?.status ?? "NOT_STARTED",
     settlementStatus: purchase?.settlementStatus ?? "NOT_STARTED",
     unlockStatus: purchase?.unlockStatus ?? "NOT_STARTED",
+    approvalId: approvalView?.id ?? null,
+    approvalStatus: approvalView?.status ?? null,
+    approvalDecision: approvalView?.decision ?? null,
+    approvalReasonCode: approvalView?.reasonCode ?? null,
+    approvalReasonText: approvalView?.reasonText ?? null,
+    approvalDecidedAt: approvalView?.decidedAt ?? null,
   };
 }
 
 export function buildAgentExecutionDetailView(
   execution: AgentExecutionRecord,
+  approval: AgentApprovalDetailView | null = null,
 ): AgentExecutionDetailView {
   const reasoning = getExecutionReasoning(execution.reasoning);
   const purchase = reasoning?.purchase ?? null;
   const failure = reasoning?.failure ?? null;
   const updatedAt = execution.completedAt ?? execution.startedAt;
+  const approvalView = approval;
 
   return {
     id: execution.id,
@@ -84,6 +116,7 @@ export function buildAgentExecutionDetailView(
           stage: failure.stage ?? null,
         }
       : null,
+    approval: approvalView,
     estimatedCostUSDC: execution.estimatedCostUSDC,
     txHash: execution.txHash,
     startedAt: execution.startedAt,
@@ -150,11 +183,50 @@ export function buildExecutionTimelineEntries(
     });
   }
 
-  if (execution.purchase?.status === "AWAITING_APPROVAL" || execution.status !== "CREATED") {
+  if (execution.approval) {
+    const approvalStatus = execution.approval.status;
+    const approvalMessage =
+      approvalStatus === "APPROVED"
+        ? "The owner approved the purchase."
+        : approvalStatus === "REJECTED"
+          ? "The owner rejected the purchase."
+          : approvalStatus === "EXPIRED"
+            ? "The approval expired before it was acted on."
+            : approvalStatus === "NO_LONGER_ACTIONABLE"
+              ? "The approval is no longer actionable."
+              : "The purchase is waiting for owner confirmation.";
+
+    events.push({
+      key: "approval",
+      label:
+        approvalStatus === "APPROVED"
+          ? "Approval approved"
+          : approvalStatus === "REJECTED"
+            ? "Approval rejected"
+            : approvalStatus === "EXPIRED"
+              ? "Approval expired"
+              : approvalStatus === "NO_LONGER_ACTIONABLE"
+                ? "Approval closed"
+                : "Approval requested",
+      status:
+        approvalStatus === "APPROVED"
+          ? "COMPLETE"
+          : approvalStatus === "REJECTED" || approvalStatus === "EXPIRED"
+            ? "SKIPPED"
+            : approvalStatus === "NO_LONGER_ACTIONABLE"
+              ? "FAILED"
+              : "CURRENT",
+      timestamp:
+        execution.approval.decidedAt ??
+        execution.approval.expiresAt ??
+        execution.createdAt,
+      message: approvalMessage,
+    });
+  } else if (execution.status !== "CREATED") {
     events.push({
       key: "approval",
       label: "Approval requested",
-      status: execution.purchase?.status === "AWAITING_APPROVAL" ? "CURRENT" : "COMPLETE",
+      status: "COMPLETE",
       timestamp: execution.createdAt,
       message: "The purchase is waiting for owner confirmation.",
     });
@@ -247,4 +319,126 @@ function extractGoalLabel(
 
 function normalizeStatus(status: string) {
   return status as AgentExecutionSummary["status"];
+}
+
+function buildApprovalView(
+  approval: AgentApprovalRow,
+  execution: AgentExecutionRecord,
+) : AgentApprovalDetailView {
+  const summary = toAgentApprovalSummary(
+    {
+      id: approval.id,
+      executionId: approval.executionId,
+      ownerId: approval.ownerId,
+      status: approval.status,
+      decision: approval.decision,
+      reasonCode: approval.reasonCode,
+      reasonText: approval.reasonText,
+      expiresAt: approval.expiresAt,
+      decidedAt: approval.decidedAt,
+      createdAt: approval.createdAt,
+      updatedAt: approval.updatedAt,
+    },
+    {
+      goal: execution.goal,
+      reasoning: execution.reasoning,
+      estimatedCostUSDC: execution.estimatedCostUSDC,
+      startedAt: execution.startedAt,
+    },
+  );
+
+  return {
+    ...summary,
+    status: summary.approvalStatus,
+  };
+}
+
+function normalizeApprovalStatus(value: string): AgentApprovalStatus {
+  if (
+    value === "APPROVED" ||
+    value === "REJECTED" ||
+    value === "EXPIRED" ||
+    value === "NO_LONGER_ACTIONABLE"
+  ) {
+    return value;
+  }
+
+  return "PENDING";
+}
+
+function normalizeApprovalDecision(value: string | null): AgentApprovalDecision | null {
+  if (value === "APPROVED" || value === "REJECTED") {
+    return value;
+  }
+
+  return null;
+}
+
+function normalizeRejectionReason(value: string | null): AgentApprovalRejectionReason | null {
+  if (
+    value === "TOO_EXPENSIVE" ||
+    value === "LOW_CONFIDENCE" ||
+    value === "NOT_RELEVANT" ||
+    value === "NO_LONGER_NEEDED" ||
+    value === "OTHER"
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+function toOptionalIsoString(value: Date | string | null) {
+  if (value === null) {
+    return null;
+  }
+
+  return toIsoString(value);
+}
+
+function toIsoString(value: Date | string) {
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value.toISOString() : new Date().toISOString();
+  }
+
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : new Date().toISOString();
+}
+
+function extractApprovalSource(reasoning: SerializableExecutionReasoning | null): AgentApprovalSource {
+  const record = reasoning ? (reasoning as unknown as Record<string, unknown>) : null;
+  const source = typeof record?.source === "string" ? record.source : null;
+  const trigger = typeof record?.trigger === "string" ? record.trigger : null;
+
+  if (source === "SCHEDULED" || trigger === "SCHEDULED") {
+    return "SCHEDULED";
+  }
+
+  return extractSchedule(reasoning) ? "SCHEDULED" : "MANUAL";
+}
+
+function extractSchedule(reasoning: SerializableExecutionReasoning | null) {
+  const record = reasoning ? (reasoning as unknown as Record<string, unknown>) : null;
+  const nested = (record?.schedule as Record<string, unknown> | undefined) ?? null;
+  const id =
+    readString(record?.scheduleId) ??
+    readString(nested?.id) ??
+    null;
+  const name =
+    readString(record?.scheduleName) ??
+    readString(nested?.name) ??
+    null;
+
+  if (!id && !name) {
+    return null;
+  }
+
+  return {
+    id: id ?? "schedule",
+    name: name ?? "Scheduled run",
+  };
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }

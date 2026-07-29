@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { jsonError } from "@/lib/http";
 import { getAgentOwnerFromRequest } from "@/lib/auth/requireAgentOwner";
 import { getOwnedAgentExecution } from "@/lib/auth/requireOwnedAgentExecution";
+import { AgentApprovalRepository } from "@/services/agent/AgentApprovalRepository";
 import { AgentExecutionRepository } from "@/services/agent/AgentExecutionRepository";
 
 export const runtime = "nodejs";
@@ -25,6 +26,12 @@ export async function POST(
 
   if (!owned) {
     return jsonError(404, "EXECUTION_NOT_FOUND", "execution not found");
+  }
+
+  const approvalRepository = new AgentApprovalRepository();
+  const approval = await approvalRepository.getApprovalForExecution(owner.ownerId, id);
+  if (!approval || approval.approvalStatus !== "APPROVED") {
+    return jsonError(409, "APPROVAL_REQUIRED", "approval must be approved before settlement can be verified");
   }
 
   const repository = new AgentExecutionRepository();

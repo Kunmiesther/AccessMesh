@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { jsonError } from "@/lib/http";
 import { getAgentOwnerFromRequest } from "@/lib/auth/requireAgentOwner";
 import { getOwnedAgentExecution } from "@/lib/auth/requireOwnedAgentExecution";
+import { AgentNotificationRepository } from "@/services/agent/AgentNotificationRepository";
 import { AgentExecutionRepository } from "@/services/agent/AgentExecutionRepository";
 import { InputError } from "@/lib/validation";
 
@@ -47,6 +48,17 @@ export async function POST(
       code,
       message,
       ...(stage ? { stage } : {}),
+    });
+
+    await new AgentNotificationRepository().ensureNotification({
+      ownerId: owner.ownerId,
+      type: "EXECUTION_FAILED",
+      title: "Execution failed",
+      message: `An execution stopped during ${stage ?? "execution"}.`,
+      entityType: "execution",
+      entityId: id,
+      actionPath: `/agent/executions/${id}`,
+      dedupeKey: `execution-failed:${id}`,
     });
 
     return NextResponse.json({

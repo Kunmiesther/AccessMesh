@@ -1,6 +1,7 @@
 import { InputError } from "@/lib/validation";
 import { runAgentRuntime } from "@/services/agent/AgentRuntime";
 import { listAgentMarketplaceCandidates } from "@/services/agent/AgentMarketplaceService";
+import { AgentNotificationRepository } from "./AgentNotificationRepository";
 import type {
   AgentBudgetPolicy,
   AgentRuntimeResult,
@@ -132,6 +133,22 @@ export async function runAgentApplication(
         stage: "RUNNING",
       }).catch((persistError) => {
         console.warn("agent execution persistence failed during failure recording", {
+          message: persistError instanceof Error ? persistError.message : String(persistError),
+        });
+      });
+
+      const notificationRepository = new AgentNotificationRepository();
+      await notificationRepository.ensureNotification({
+        ownerId: persistence.ownerId,
+        type: "EXECUTION_FAILED",
+        title: "Execution failed",
+        message: "The agent execution could not be completed.",
+        entityType: "execution",
+        entityId: executionId,
+        actionPath: `/agent/executions/${executionId}`,
+        dedupeKey: `execution-failed:${executionId}`,
+      }).catch((persistError) => {
+        console.warn("agent execution persistence failed during failure notification", {
           message: persistError instanceof Error ? persistError.message : String(persistError),
         });
       });

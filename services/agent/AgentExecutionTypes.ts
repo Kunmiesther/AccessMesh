@@ -5,6 +5,14 @@ import type {
   AgentResourceCandidate,
   CandidateEvaluation,
 } from "@/services/agent/types";
+import type {
+  AgentApprovalDetailView,
+  AgentApprovalSummaryView,
+  AgentApprovalDecision,
+  AgentApprovalRejectionReason,
+  AgentApprovalSource,
+  AgentApprovalStatus,
+} from "./AgentApprovalTypes";
 import type { AgentPolicyStatus } from "./AgentPolicyTypes";
 
 export type AgentExecutionStatus =
@@ -192,6 +200,12 @@ export type AgentExecutionSummary = Readonly<{
   purchaseStatus: AgentPurchaseStatus;
   settlementStatus: AgentSettlementStatus;
   unlockStatus: AgentUnlockStatus;
+  approvalId?: string | null;
+  approvalStatus?: AgentApprovalStatus | null;
+  approvalDecision?: AgentApprovalDecision | null;
+  approvalReasonCode?: AgentApprovalRejectionReason | null;
+  approvalReasonText?: string | null;
+  approvalDecidedAt?: string | null;
 }>;
 
 export type AgentExecutionHistoryPage = Readonly<{
@@ -227,6 +241,7 @@ export type AgentExecutionDetailView = Readonly<{
     message: string;
     stage: string | null;
   }> | null;
+  approval?: AgentApprovalDetailView | null;
   estimatedCostUSDC: number | null;
   txHash: string | null;
   startedAt: string;

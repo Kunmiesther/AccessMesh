@@ -35,6 +35,7 @@ import type {
   SerializableTraceEntry,
   SerializableUnlockMetadata,
 } from "./AgentExecutionTypes";
+import { buildAgentExecutionSummary } from "./AgentExecutionViews";
 import {
   expandAgentExecutionHistoryStatusFilter,
   type AgentExecutionHistoryCursor,
@@ -87,6 +88,14 @@ export type AgentExecutionRepositoryClient = {
     findMany(args: {
       where?: PrismaLikeRecord;
       orderBy?: Array<{ startedAt: "asc" | "desc" } | { id: "asc" | "desc" }>;
+      take?: number;
+      select: Record<string, boolean>;
+    }): Promise<PrismaLikeRecord[]>;
+  };
+  agentExecutionApproval?: {
+    findMany(args: {
+      where?: PrismaLikeRecord;
+      orderBy?: Array<{ createdAt: "asc" | "desc" } | { id: "asc" | "desc" }>;
       take?: number;
       select: Record<string, boolean>;
     }): Promise<PrismaLikeRecord[]>;
@@ -147,6 +156,20 @@ const EXECUTION_LIST_SELECT = {
   txHash: true,
   startedAt: true,
   completedAt: true,
+} satisfies Record<string, boolean>;
+
+const APPROVAL_LIST_SELECT = {
+  id: true,
+  executionId: true,
+  ownerId: true,
+  status: true,
+  decision: true,
+  reasonCode: true,
+  reasonText: true,
+  expiresAt: true,
+  decidedAt: true,
+  createdAt: true,
+  updatedAt: true,
 } satisfies Record<string, boolean>;
 
 export class AgentExecutionRepository {
@@ -563,7 +586,23 @@ export class AgentExecutionRepository {
 
     const hasMore = records.length > limit;
     const pageRecords = hasMore ? records.slice(0, limit) : records;
-    const executions = pageRecords.map((record) => this.mapExecutionSummary(record));
+    const approvals =
+      pageRecords.length > 0 && client.agentExecutionApproval
+        ? await client.agentExecutionApproval.findMany({
+            where: {
+              executionId: {
+                in: pageRecords.map((record) => String(record.id)),
+              },
+            },
+            select: APPROVAL_LIST_SELECT,
+          })
+        : [];
+    const approvalByExecutionId = new Map(
+      approvals.map((approval) => [String(approval.executionId), approval]),
+    );
+    const executions = pageRecords.map((record) =>
+      this.mapExecutionSummary(record, approvalByExecutionId.get(String(record.id)) ?? null),
+    );
     const lastRecord = pageRecords[pageRecords.length - 1];
 
     return {
@@ -700,42 +739,11 @@ export class AgentExecutionRepository {
     };
   }
 
-  private mapExecutionSummary(execution: PrismaLikeRecord): AgentExecutionSummary {
-    const reasoning = normalizeReasoning(execution.reasoning);
-    const purchase = reasoning?.purchase ?? null;
-    const failure = reasoning?.failure ?? null;
-    const selectedResource = reasoning?.selectedResource ?? null;
-    const policy = reasoning?.policy ?? null;
-    const startedAt = toIsoString(execution.startedAt);
-    const completedAt = toOptionalIsoString(execution.completedAt);
-
-    return {
-      id: String(execution.id),
-      goal: String(execution.goal ?? ""),
-      status: String(execution.status ?? "CREATED") as AgentExecutionStatus,
-      decision: isRecommendationDecision(execution.decision) ? execution.decision : null,
-      policyId: policy?.policyId ?? null,
-      policyName: policy?.policyName ?? null,
-      policyVersion: policy?.policyVersion ?? null,
-      selectedResourceId:
-        typeof execution.selectedResourceId === "string" && execution.selectedResourceId.trim().length > 0
-          ? execution.selectedResourceId
-          : null,
-      selectedResourceTitle: selectedResource?.title ?? null,
-      estimatedCostUSDC: normalizeOptionalNumber(execution.estimatedCostUSDC),
-      txHash:
-        typeof execution.txHash === "string" && execution.txHash.trim().length > 0
-          ? execution.txHash
-          : null,
-      createdAt: startedAt,
-      updatedAt: completedAt ?? startedAt,
-      completedAt,
-      failureCode: failure?.code ?? null,
-      failureStage: failure?.stage ?? null,
-      purchaseStatus: purchase?.status ?? "NOT_STARTED",
-      settlementStatus: purchase?.settlementStatus ?? "NOT_STARTED",
-      unlockStatus: purchase?.unlockStatus ?? "NOT_STARTED",
-    };
+  private mapExecutionSummary(
+    execution: PrismaLikeRecord,
+    approval: PrismaLikeRecord | null = null,
+  ): AgentExecutionSummary {
+    return buildAgentExecutionSummary(this.mapExecution(execution), approval as never);
   }
 }
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getAgentOwnerFromRequest } from "@/lib/auth/requireAgentOwner";
 import { getOwnedAgentExecution } from "@/lib/auth/requireOwnedAgentExecution";
 import { jsonError } from "@/lib/http";
+import { AgentApprovalConflictError, AgentApprovalRepository } from "@/services/agent/AgentApprovalRepository";
 import { AgentExecutionRepository } from "@/services/agent/AgentExecutionRepository";
 
 export const runtime = "nodejs";
@@ -28,10 +29,23 @@ export async function POST(
   }
 
   const repository = new AgentExecutionRepository();
-  const execution = await repository.markAwaitingApproval(id);
+  const approvalRepository = new AgentApprovalRepository();
 
-  return NextResponse.json({
-    ok: true,
-    execution,
-  });
+  try {
+    const execution = await repository.markAwaitingApproval(id);
+    await approvalRepository.ensureApprovalForExecution(id, {
+      ownerId: owner.ownerId,
+    });
+
+    return NextResponse.json({
+      ok: true,
+      execution,
+    });
+  } catch (error) {
+    if (error instanceof AgentApprovalConflictError) {
+      return jsonError(409, "APPROVAL_CONFLICT", error.message);
+    }
+
+    throw error;
+  }
 }

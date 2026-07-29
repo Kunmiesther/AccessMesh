@@ -14,7 +14,9 @@ model User {
   role          String // CONSUMER | PROVIDER
   createdAt     DateTime @default(now())
 
-  resources Resource[]
+  resources      Resource[]
+  agentApprovals  AgentExecutionApproval[]
+  agentNotifications AgentNotification[]
 }
 
 model Resource {
@@ -226,9 +228,49 @@ model AgentExecution {
   completedAt        DateTime?
 
   agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  approval AgentExecutionApproval?
 
   @@index([agentId])
   @@index([status])
   @@index([selectedResourceId])
   @@index([startedAt])
+}
+
+model AgentExecutionApproval {
+  id          String   @id @default(cuid())
+  executionId String   @unique
+  ownerId     String
+  status      String   @default("PENDING")
+  decision    String?
+  reasonCode  String?
+  reasonText  String?
+  expiresAt   DateTime?
+  decidedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  execution AgentExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  owner     User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId, status, createdAt])
+  @@index([ownerId, decidedAt])
+}
+
+model AgentNotification {
+  id          String   @id @default(cuid())
+  ownerId     String
+  type        String
+  title       String
+  message     String
+  entityType  String?
+  entityId    String?
+  actionPath  String?
+  dedupeKey   String?  @unique
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId, readAt, createdAt])
+  @@index([ownerId, createdAt])
 }

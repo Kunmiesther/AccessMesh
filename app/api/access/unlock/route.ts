@@ -3,6 +3,7 @@ import { getAgentOwnerFromRequest } from "@/lib/auth/requireAgentOwner";
 import { getOwnedAgentExecution } from "@/lib/auth/requireOwnedAgentExecution";
 import { jsonError } from "@/lib/http";
 import { AgentExecutionRepository } from "@/services/agent/AgentExecutionRepository";
+import { AgentNotificationRepository } from "@/services/agent/AgentNotificationRepository";
 import { getWalletFromRequest, InputError } from "@/lib/validation";
 import { unlockAccess } from "@/services/accessFlowService";
 
@@ -13,12 +14,11 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const owner = getAgentOwnerFromRequest(request);
-    const executionId = typeof body.executionId === "string" ? body.executionId : null;
-    const wallet = owner?.walletAddress ?? getWalletFromRequest(request);
-
-    if (executionId && !owner) {
+    if (!owner) {
       return jsonError(401, "ACCESS_UNLOCK_UNAUTHORIZED", "authentication required");
     }
+    const executionId = typeof body.executionId === "string" ? body.executionId : null;
+    const wallet = owner.walletAddress ?? getWalletFromRequest(request);
 
     const ownedExecution = executionId
       ? await getOwnedAgentExecution(
@@ -65,6 +65,28 @@ export async function POST(request: Request) {
           amountUSDC: body.amountUSDC ?? null,
           resourceId: body.resourceId ?? ownedExecution.execution.selectedResourceId ?? null,
         });
+
+        await new AgentNotificationRepository().ensureNotification({
+          ownerId: owner.ownerId,
+          type: "UNLOCK_COMPLETED",
+          title: "Unlock completed",
+          message: "The purchased resource was verified and unlocked successfully.",
+          entityType: "execution",
+          entityId: executionId,
+          actionPath: `/agent/executions/${executionId}`,
+          dedupeKey: `unlock-completed:${executionId}`,
+        });
+
+        await new AgentNotificationRepository().ensureNotification({
+          ownerId: owner.ownerId,
+          type: "EXECUTION_COMPLETED",
+          title: "Execution completed",
+          message: "The purchase and unlock were completed.",
+          entityType: "execution",
+          entityId: executionId,
+          actionPath: `/agent/executions/${executionId}`,
+          dedupeKey: `execution-completed:${executionId}`,
+        });
       } else if (result.verification.status === "FAILED") {
         await repository.failExecution(executionId, {
           code: "UNLOCK_FAILED",
@@ -72,6 +94,17 @@ export async function POST(request: Request) {
             result.verification.reason ??
             "The access unlock could not be completed.",
           stage: "UNLOCKING",
+        });
+
+        await new AgentNotificationRepository().ensureNotification({
+          ownerId: owner.ownerId,
+          type: "EXECUTION_FAILED",
+          title: "Execution failed",
+          message: result.verification.reason ?? "The access unlock could not be completed.",
+          entityType: "execution",
+          entityId: executionId,
+          actionPath: `/agent/executions/${executionId}`,
+          dedupeKey: `execution-failed:${executionId}`,
         });
       }
     }

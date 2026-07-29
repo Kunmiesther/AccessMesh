@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { jsonError } from "@/lib/http";
 import { getAgentOwnerFromRequest } from "@/lib/auth/requireAgentOwner";
 import { getOwnedAgentExecution } from "@/lib/auth/requireOwnedAgentExecution";
+import { AgentApprovalRepository } from "@/services/agent/AgentApprovalRepository";
 import { AgentExecutionRepository } from "@/services/agent/AgentExecutionRepository";
+import { AgentNotificationRepository } from "@/services/agent/AgentNotificationRepository";
 import { InputError } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -39,12 +41,33 @@ export async function POST(
   }
 
   const repository = new AgentExecutionRepository();
+  const approvalRepository = new AgentApprovalRepository();
   try {
+    const approval = await approvalRepository.getApprovalForExecution(owner.ownerId, id);
+    if (!approval) {
+      return jsonError(409, "APPROVAL_REQUIRED", "approval is required before payment can be submitted");
+    }
+
+    if (approval.approvalStatus !== "APPROVED") {
+      return jsonError(409, "APPROVAL_REQUIRED", "approval must be approved before payment can be submitted");
+    }
+
     const execution = await repository.recordPaymentSubmitted(id, {
       transactionId,
       amountUSDC,
       resourceId,
       resourceTitle,
+    });
+
+    await new AgentNotificationRepository().ensureNotification({
+      ownerId: owner.ownerId,
+      type: "PAYMENT_SUBMITTED",
+      title: "Payment submitted",
+      message: `The Arc payment for "${resourceTitle}" was submitted.`,
+      entityType: "execution",
+      entityId: id,
+      actionPath: `/agent/executions/${id}`,
+      dedupeKey: `payment-submitted:${id}`,
     });
 
     return NextResponse.json({

@@ -154,8 +154,14 @@ async function AnalyticsContent({
               <Link href="/agent" style={footerLinkStyle}>
                 Run Research Agent
               </Link>
+              <Link href="/agent/inbox" style={footerLinkStyle}>
+                View inbox
+              </Link>
               <Link href="/agent/history" style={footerLinkStyle}>
                 View history
+              </Link>
+              <Link href="/agent/notifications" style={footerLinkStyle}>
+                View notifications
               </Link>
               <Link href="/agent/policies" style={footerLinkStyle}>
                 View policies

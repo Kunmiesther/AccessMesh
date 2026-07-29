@@ -18,8 +18,13 @@ export function AgentExecutionCard({
         <div style={titleBlockStyle}>
           <div style={badgeRowStyle}>
             <AgentDecisionBadge decision={execution.decision} />
-            <AgentExecutionStatusBadge status={execution.status} />
-          </div>
+        <AgentExecutionStatusBadge status={execution.status} />
+        {execution.approvalStatus ? (
+          <span style={approvalBadgeStyle} title={approvalBadgeTitle(execution.approvalStatus)}>
+            {approvalBadgeLabel(execution.approvalStatus)}
+          </span>
+        ) : null}
+      </div>
           <h3 style={titleStyle}>{execution.goal}</h3>
         </div>
         <Link href={`/agent/executions/${execution.id}`} style={viewLinkStyle}>
@@ -143,6 +148,19 @@ const badgeRowStyle = {
   gap: 8,
 } as const;
 
+const approvalBadgeStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 10,
+  color: "var(--text-secondary)",
+  background: "rgba(255,255,255,0.03)",
+  border: "1px solid var(--border)",
+  borderRadius: 999,
+  padding: "6px 9px",
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  whiteSpace: "nowrap" as const,
+} as const;
+
 const titleStyle = {
   color: "var(--text-primary)",
   fontSize: 18,
@@ -204,3 +222,43 @@ const failureStyle = {
   letterSpacing: "0.04em",
   textTransform: "uppercase",
 } as const;
+
+function approvalBadgeLabel(status: NonNullable<AgentExecutionSummary["approvalStatus"]>) {
+  if (status === "APPROVED") {
+    return "Approved";
+  }
+
+  if (status === "REJECTED") {
+    return "Rejected";
+  }
+
+  if (status === "EXPIRED") {
+    return "Expired";
+  }
+
+  if (status === "NO_LONGER_ACTIONABLE") {
+    return "Closed";
+  }
+
+  return "Awaiting approval";
+}
+
+function approvalBadgeTitle(status: NonNullable<AgentExecutionSummary["approvalStatus"]>) {
+  if (status === "APPROVED") {
+    return "The owner approved this recommendation.";
+  }
+
+  if (status === "REJECTED") {
+    return "The owner rejected this recommendation.";
+  }
+
+  if (status === "EXPIRED") {
+    return "The approval expired before it was acted on.";
+  }
+
+  if (status === "NO_LONGER_ACTIONABLE") {
+    return "The approval is no longer actionable.";
+  }
+
+  return "The execution is waiting for owner confirmation.";
+}

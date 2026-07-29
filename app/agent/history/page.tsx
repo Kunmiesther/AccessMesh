@@ -46,6 +46,12 @@ export default async function AgentHistoryPage({
               <Link href="/agent" style={primaryLinkStyle}>
                 Run Research Agent
               </Link>
+              <Link href="/agent/inbox" style={secondaryLinkStyle}>
+                View inbox
+              </Link>
+              <Link href="/agent/notifications" style={secondaryLinkStyle}>
+                View notifications
+              </Link>
               <Link href="/agent/analytics" style={secondaryLinkStyle}>
                 View analytics
               </Link>

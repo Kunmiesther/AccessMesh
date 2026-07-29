@@ -304,6 +304,12 @@ export function ResearchAgentPage() {
               <Link href="/agent/history" style={secondaryActionButtonStyle}>
                 View agent history
               </Link>
+              <Link href="/agent/inbox" style={secondaryActionButtonStyle}>
+                View inbox
+              </Link>
+              <Link href="/agent/notifications" style={secondaryActionButtonStyle}>
+                View notifications
+              </Link>
               <Link href="/agent/analytics" style={secondaryActionButtonStyle}>
                 View analytics
               </Link>

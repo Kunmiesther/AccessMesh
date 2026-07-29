@@ -11,6 +11,7 @@ import { AgentExecutionStatusBadge } from "./AgentExecutionStatusBadge";
 import { AgentExecutionTimeline } from "./AgentExecutionTimeline";
 import { CopyValueButton } from "./CopyValueButton";
 import { getExecutionStatusPresentation } from "./executionPresentation";
+import { AgentApprovalDecisionPanel } from "../approvals/AgentApprovalDecisionPanel";
 
 export function AgentExecutionDetailPanel({
   execution,
@@ -43,6 +44,12 @@ export function AgentExecutionDetailPanel({
         <div style={headerActionsStyle}>
           <Link href="/agent/history" style={secondaryLinkStyle}>
             Back to history
+          </Link>
+          <Link href="/agent/inbox" style={secondaryLinkStyle}>
+            View inbox
+          </Link>
+          <Link href="/agent/notifications" style={secondaryLinkStyle}>
+            View notifications
           </Link>
           <Link href="/agent/analytics" style={secondaryLinkStyle}>
             View analytics
@@ -268,6 +275,33 @@ export function AgentExecutionDetailPanel({
           </div>
         )}
       </section>
+
+      {execution.approval ? (
+        <section style={contentPanelStyle} aria-label="Approval">
+          <SectionHeader
+            eyebrow="Approval"
+            title="Owner decision"
+            copy="The execution remains linked to this approval record even if the saved policy changes later."
+          />
+
+          <div style={approvalGridStyle}>
+            <AgentApprovalDecisionPanel approval={execution.approval} readOnly={execution.approval.status !== "PENDING"} />
+            <div style={approvalNotesStyle}>
+              <p style={approvalNotesTitleStyle}>Approval snapshot</p>
+              <div style={definitionGridStyle}>
+                <Definition label="Decision" value={execution.approval.decision ?? "Pending"} />
+                <Definition label="Reason code" value={execution.approval.reasonCode ?? "Unavailable"} />
+                <Definition label="Reason text" value={execution.approval.reasonText ?? "Unavailable"} />
+                <Definition
+                  label="Expires"
+                  value={execution.approval.expiresAt ? formatDateTime(execution.approval.expiresAt) : "No expiration"}
+                  title={execution.approval.expiresAt ?? undefined}
+                />
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       <section style={contentPanelStyle} aria-label="Candidate comparison">
         <SectionHeader
@@ -697,6 +731,24 @@ const recommendationGridStyle = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 240px), 1fr))",
   gap: 12,
+} as const;
+
+const approvalGridStyle = {
+  display: "grid",
+  gap: 12,
+} as const;
+
+const approvalNotesStyle = {
+  display: "grid",
+  gap: 12,
+} as const;
+
+const approvalNotesTitleStyle = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 11,
+  color: "var(--accent)",
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
 } as const;
 
 const recommendationCardStyle = {

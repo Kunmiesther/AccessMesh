@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { jsonError } from "@/lib/http";
 import { getAgentOwnerFromRequest } from "@/lib/auth/requireAgentOwner";
 import { getOwnedAgentExecution } from "@/lib/auth/requireOwnedAgentExecution";
+import { AgentApprovalConflictError, AgentApprovalRepository } from "@/services/agent/AgentApprovalRepository";
 import { AgentExecutionRepository } from "@/services/agent/AgentExecutionRepository";
 
 export const runtime = "nodejs";
@@ -28,10 +29,34 @@ export async function POST(
   }
 
   const repository = new AgentExecutionRepository();
-  const execution = await repository.cancelAwaitingApproval(id);
+  const approvalRepository = new AgentApprovalRepository();
 
-  return NextResponse.json({
-    ok: true,
-    execution,
-  });
+  try {
+    const approvalRecord = await approvalRepository.getApprovalForExecution(owner.ownerId, id);
+    if (!approvalRecord) {
+      return jsonError(404, "APPROVAL_NOT_FOUND", "approval not found");
+    }
+
+    const approval = await approvalRepository.rejectExecution(approvalRecord.id, owner.ownerId, {
+      reasonCode: "NO_LONGER_NEEDED",
+      reasonText: null,
+    });
+
+    if (!approval) {
+      return jsonError(404, "APPROVAL_NOT_FOUND", "approval not found");
+    }
+
+    const execution = await repository.cancelAwaitingApproval(id);
+
+    return NextResponse.json({
+      ok: true,
+      execution,
+    });
+  } catch (error) {
+    if (error instanceof AgentApprovalConflictError) {
+      return jsonError(409, "APPROVAL_CONFLICT", error.message);
+    }
+
+    throw error;
+  }
 }
